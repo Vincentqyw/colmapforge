@@ -42,7 +42,7 @@ jobs:
             --collect-all cv2 \
             --collect-all onnxruntime \
             --hidden-import darkdetect \
-            colmap_preprocessor/app.py
+            run.py
 
       - name: Package as zip
         # ditto preserves macOS metadata, symlinks, and bundle structure
