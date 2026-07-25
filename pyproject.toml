@@ -1,0 +1,76 @@
+[project]
+name = "colmap-preprocessor"
+version = "1.0.0"
+description = "COLMAP video/image preprocessing tool with SAM-based dynamic object masking"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Vincent Qin" }]
+
+dependencies = [
+    "opencv-python>=4.8",
+    "numpy>=1.24",
+    "onnx>=1.14",
+    "pyyaml>=6.0",
+    "PyQt6>=6.6",
+    "darkdetect>=0.8",
+    "osam>=0.2.0",
+    # Auto-download of SkyWater weights from HuggingFace Hub.
+    "huggingface_hub>=0.24",
+    # NOTE: ONNX Runtime is intentionally NOT a hard dependency.
+    # `onnxruntime`, `onnxruntime-gpu`, and `onnxruntime-directml` are mutually
+    # exclusive — they all install the same `onnxruntime` Python module but with
+    # different native binaries. If more than one is installed, their files
+    # (especially capi/version_info.py) overwrite each other and CUDA silently
+    # disappears from `get_available_providers()`.
+    #
+    # Install EXACTLY ONE via the extras below, or manually:
+    #   uv pip install -e ".[gpu]"        # NVIDIA + CUDA
+    #   uv pip install -e ".[directml]"   # Windows any GPU
+    #   uv pip install -e ".[cpu]"        # pure CPU
+]
+
+[project.optional-dependencies]
+# CPU-only build (default fallback). Safe on every platform.
+cpu = ["onnxruntime>=1.17.0"]
+# CUDA acceleration (NVIDIA GPUs). Requires CUDA 13.x runtime libs on the system
+# (cudart64_13.dll etc.). Driver >= 580 for CUDA 13.
+gpu = ["onnxruntime-gpu>=1.17.0"]
+# DirectML acceleration (Windows, AMD/Intel/NVIDIA GPUs). No CUDA needed.
+directml = ["onnxruntime-directml>=1.17.0"]
+
+[project.scripts]
+colmap-prep = "colmap_preprocessor.app:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["colmap_preprocessor"]
+
+# ── uv: prevent the CPU onnxruntime wheel from being auto-installed ──
+# `osam` (a hard dependency) declares `onnxruntime` as its own dependency.
+# Without this override, every `uv sync` / `uv pip install` would pull in
+# the CPU `onnxruntime` wheel, which silently overwrites `onnxruntime-gpu`'s
+# binaries (they share site-packages/onnxruntime/) and makes CUDA disappear
+# from get_available_providers() with no error.
+#
+# The override replaces osam's `onnxruntime` requirement with a constraint
+# that never matches, so uv skips installing the CPU wheel. The user must
+# then install the GPU/DirectML/CPU wheel explicitly via the [gpu]/[directml]/[cpu]
+# extras — those extras are NOT subject to this override (the marker excludes
+# them by checking extra != 'gpu' / 'directml' / 'cpu').
+[[tool.uv.override-dependencies]]
+package = { name = "osam" }
+dependencies = [
+    "onnxruntime ; sys_platform == 'never_install_cpu_onnxruntime_via_osam'",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+ignore = ["E501"]

@@ -1,0 +1,7 @@
+.venv
+**__pycache__**
+.trae/
+
+# Logo / UI preview artifacts (rendered PNGs + HTML galleries, not source)
+.logo_preview/
+.logo_candidates/
