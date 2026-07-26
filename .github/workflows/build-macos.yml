@@ -38,6 +38,7 @@ jobs:
         run: |
           uv run pyinstaller --noconfirm --windowed --name "COLMAP-Forge" \
             --add-data "colmapforge/views/styles:colmapforge/views/styles" \
+            --add-data "colmapforge/configs:colmapforge/configs" \
             --collect-submodules colmapforge \
             --collect-all cv2 \
             --collect-all onnxruntime \

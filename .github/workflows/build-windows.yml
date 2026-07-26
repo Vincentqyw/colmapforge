@@ -36,6 +36,7 @@ jobs:
         run: |
           uv run pyinstaller --noconfirm --windowed --name "COLMAP-Forge" `
             --add-data "colmapforge/views/styles;colmapforge/views/styles" `
+            --add-data "colmapforge/configs;colmapforge/configs" `
             --collect-submodules colmapforge `
             --collect-all cv2 `
             --collect-all onnxruntime `
@@ -88,6 +89,7 @@ jobs:
         run: |
           uv run pyinstaller --noconfirm --windowed --name "COLMAP-Forge-GPU" `
             --add-data "colmapforge/views/styles;colmapforge/views/styles" `
+            --add-data "colmapforge/configs;colmapforge/configs" `
             --collect-submodules colmapforge `
             --collect-all cv2 `
             --collect-all onnxruntime `
@@ -140,6 +142,7 @@ jobs:
         run: |
           uv run pyinstaller --noconfirm --windowed --name "COLMAP-Forge-CUDA" `
             --add-data "colmapforge/views/styles;colmapforge/views/styles" `
+            --add-data "colmapforge/configs;colmapforge/configs" `
             --collect-submodules colmapforge `
             --collect-all cv2 `
             --collect-all onnxruntime `
