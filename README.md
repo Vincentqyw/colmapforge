@@ -1,7 +1,7 @@
 # COLMAP Forge
 
 <p align="center">
-  <img src="assets/colmapforge-gui.png" alt="COLMAP Forge GUI" width="800">
+  <img src="assets/colmapforge-gui.jpg" alt="COLMAP Forge GUI" width="1000">
 </p>
 
 A PyQt6 desktop wizard that prepares video and image data for [COLMAP](https://github.com/colmap/colmap) Structure-from-Motion frame extraction, resizing, SAM-based dynamic object masking, and `database.db` export.
