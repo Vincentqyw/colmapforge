@@ -1,4 +1,4 @@
-# Build COLMAP Forge for Windows — produces a distributable .zip
+# Build COLMAP Forge for Windows — produces CPU, DirectML, and CUDA .zip bundles.
 # Triggered by version tags (v*) or manual dispatch.
 name: Build (Windows)
 
@@ -11,21 +11,21 @@ permissions:
   contents: write   # required by softprops/action-gh-release to upload assets
 
 jobs:
-  build-windows:
+  build-windows-cpu:
     runs-on: windows-latest
+    name: Windows (CPU)
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.10"
 
       - name: Install uv
         uses: astral-sh/setup-uv@v3
 
-      - name: Install dependencies (CPU-only onnxruntime)
-        # CPU build keeps the bundle small; GPU users install onnxruntime-gpu
-        # separately. See README → ONNX Runtime Backend section.
+      - name: Install dependencies (CPU onnxruntime)
+        # CPU build keeps the bundle small and works on any machine.
         run: uv sync --extra cpu --no-dev
 
       - name: Install PyInstaller
@@ -46,18 +46,122 @@ jobs:
         shell: pwsh
         run: |
           Compress-Archive -Path dist/COLMAP-Forge/* `
-            -DestinationPath COLMAP-Forge-windows-x64.zip -Force
+            -DestinationPath COLMAP-Forge-windows-x64-CPU.zip -Force
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: COLMAP-Forge-windows-x64
-          path: COLMAP-Forge-windows-x64.zip
+          name: COLMAP-Forge-windows-x64-CPU
+          path: COLMAP-Forge-windows-x64-CPU.zip
           retention-days: 30
 
       - name: Upload to GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: COLMAP-Forge-windows-x64.zip
+          files: COLMAP-Forge-windows-x64-CPU.zip
+          generate_release_notes: true
+
+  build-windows-gpu:
+    runs-on: windows-latest
+    name: Windows (GPU — DirectML)
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install dependencies (DirectML onnxruntime)
+        # DirectML works on any DirectX 12 GPU (AMD, Intel, NVIDIA).
+        # No CUDA or vendor-specific runtime required.
+        run: uv sync --extra directml --no-dev
+
+      - name: Install PyInstaller
+        run: uv pip install pyinstaller
+
+      - name: Build executable
+        # Windows --add-data separator is ';'
+        run: |
+          uv run pyinstaller --noconfirm --windowed --name "COLMAP-Forge-GPU" `
+            --add-data "colmapforge/views/styles;colmapforge/views/styles" `
+            --collect-submodules colmapforge `
+            --collect-all cv2 `
+            --collect-all onnxruntime `
+            --hidden-import darkdetect `
+            run.py
+
+      - name: Package as zip
+        shell: pwsh
+        run: |
+          Compress-Archive -Path dist/COLMAP-Forge-GPU/* `
+            -DestinationPath COLMAP-Forge-windows-x64-GPU.zip -Force
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: COLMAP-Forge-windows-x64-GPU
+          path: COLMAP-Forge-windows-x64-GPU.zip
+          retention-days: 30
+
+      - name: Upload to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: COLMAP-Forge-windows-x64-GPU.zip
+          generate_release_notes: true
+
+  build-windows-cuda:
+    runs-on: windows-latest
+    name: Windows (GPU — CUDA)
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install dependencies (CUDA onnxruntime-gpu)
+        # Requires NVIDIA GPU with CUDA 13.x runtime at runtime.
+        # The CI runner does NOT have a GPU; we only package the binaries.
+        run: uv sync --extra gpu --no-dev
+
+      - name: Install PyInstaller
+        run: uv pip install pyinstaller
+
+      - name: Build executable
+        # Windows --add-data separator is ';'
+        run: |
+          uv run pyinstaller --noconfirm --windowed --name "COLMAP-Forge-CUDA" `
+            --add-data "colmapforge/views/styles;colmapforge/views/styles" `
+            --collect-submodules colmapforge `
+            --collect-all cv2 `
+            --collect-all onnxruntime `
+            --hidden-import darkdetect `
+            run.py
+
+      - name: Package as zip
+        shell: pwsh
+        run: |
+          Compress-Archive -Path dist/COLMAP-Forge-CUDA/* `
+            -DestinationPath COLMAP-Forge-windows-x64-CUDA.zip -Force
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: COLMAP-Forge-windows-x64-CUDA
+          path: COLMAP-Forge-windows-x64-CUDA.zip
+          retention-days: 30
+
+      - name: Upload to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: COLMAP-Forge-windows-x64-CUDA.zip
           generate_release_notes: true

@@ -158,7 +158,7 @@ uv sync --extra gpu
 
 ## Requirements
 
-- Python ≥ 3.11
+- Python ≥ 3.10
 - PyQt6 ≥ 6.6
 - OpenCV ≥ 4.8
 - ONNX Runtime (see [above](#onnx-runtime-backend))
