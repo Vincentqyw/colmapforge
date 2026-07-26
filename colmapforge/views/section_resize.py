@@ -23,6 +23,7 @@ class ResizeSection(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._image_w = 1920; self._image_h = 1080
+        self._has_dims = False
         self._ds_factor = 4
 
         ly = QVBoxLayout(self); ly.setContentsMargins(0, 0, 0, 0); ly.setSpacing(2)
@@ -51,15 +52,20 @@ class ResizeSection(QWidget):
         p1 = QWidget(); p1l = QHBoxLayout(p1); p1l.setContentsMargins(0, 0, 0, 0); p1l.setSpacing(4)
         self._ds_btns = []
         for factor in [1, 2, 4, 8]:
-            btn = QPushButton(f"{factor}×"); btn.setCheckable(True); btn.setFixedWidth(40)
+            btn = QPushButton(f"{factor}x"); btn.setCheckable(True); btn.setFixedWidth(40)
             btn.clicked.connect(lambda _, f=factor: self._on_ds_clicked(f))
             p1l.addWidget(btn); self._ds_btns.append(btn)
         self._ds_btns[2].setChecked(True); p1l.addStretch()
         self._resize_stack.addWidget(p1)
-        grid.addWidget(self._resize_stack, row, 1, 1, 2); row += 1
 
+        # Stack + result hint in same VBox (0 spacing) → no grid row gap
         self.lbl_resize_result = QLabel(""); self.lbl_resize_result.setObjectName("hintLabel")
-        grid.addWidget(self.lbl_resize_result, row, 0, 1, 3)
+        self.lbl_resize_result.hide()
+        resize_col = QWidget()
+        rl = QVBoxLayout(resize_col); rl.setContentsMargins(0, 0, 0, 0); rl.setSpacing(0)
+        rl.addWidget(self._resize_stack)
+        rl.addWidget(self.lbl_resize_result)
+        grid.addWidget(resize_col, row, 1, 1, 2); row += 1
 
         self.cmb_resize_mode.currentIndexChanged.connect(self._on_resize_mode_changed)
         self.cmb_resize_mode.setCurrentIndex(1)
@@ -101,6 +107,7 @@ class ResizeSection(QWidget):
     def set_image_dims(self, w: int, h: int) -> None:
         if w <= 0 or h <= 0: return
         self._image_w, self._image_h = w, h
+        self._has_dims = True
         self.spin_max_dim.setValue(max(w, h))
         self._update_resize_result()
 
@@ -114,16 +121,20 @@ class ResizeSection(QWidget):
 
     def _on_ds_clicked(self, factor: int) -> None:
         self._ds_factor = factor
-        for b in self._ds_btns: b.setChecked(b.text() == f"{factor}×")
+        for b in self._ds_btns: b.setChecked(b.text() == f"{factor}x")
         self._update_resize_result()
         self.config_changed.emit()
 
     def _update_resize_result(self, _=None) -> None:
+        if not self._has_dims:
+            self.lbl_resize_result.hide()
+            return
+        self.lbl_resize_result.show()
         w, h = self._image_w, self._image_h
         mode = self.cmb_resize_mode.currentData()
         if mode == "max_dim":
             scale = self.spin_max_dim.value() / max(w, h)
-            self.lbl_resize_result.setText(f"→ {int(w * scale)} × {int(h * scale)}")
+            self.lbl_resize_result.setText(f"{w} x {h} → {int(w * scale)} x {int(h * scale)}")
         else:
             rw, rh = w // self._ds_factor, h // self._ds_factor
-            self.lbl_resize_result.setText(f"→ {rw} × {rh}  (÷{self._ds_factor})")
+            self.lbl_resize_result.setText(f"{w} x {h} → {rw} x {rh}  (÷{self._ds_factor})")

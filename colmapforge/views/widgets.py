@@ -7,12 +7,14 @@ dependency. Used by section widgets and MainWindow itself.
 
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, QEvent, QObject
+from PyQt6.QtCore import QSize, Qt, QEvent, QObject
+from PyQt6.QtGui import QIcon, QPixmap
 from PyQt6.QtWidgets import (
     QCheckBox, QComboBox, QDoubleSpinBox, QGridLayout, QLabel, QSpinBox, QWidget,
 )
 
 from .constants import _S, _W
+from .icons import _icon_checkbox_checked, _icon_checkbox_unchecked
 
 
 # ── Scroll blocker ────────────────────────────────────────────────────
@@ -94,5 +96,12 @@ def _section_header(title: str, checkable: bool = False) -> QCheckBox | QLabel:
     """Create section header. If checkable, returns QCheckBox#sectionCheck; else QLabel#sectionHeader."""
     if checkable:
         cb = QCheckBox(title); cb.setObjectName("sectionCheck"); cb.setChecked(True)
+        cb.setIconSize(QSize(16, 16))
+
+        def _toggle_icon(checked):
+            cb.setIcon(_icon_checkbox_checked() if checked else _icon_checkbox_unchecked())
+
+        _toggle_icon(True)
+        cb.toggled.connect(_toggle_icon)
         return cb
     lbl = QLabel(title); lbl.setObjectName("sectionHeader"); return lbl

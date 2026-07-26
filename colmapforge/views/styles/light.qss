@@ -58,19 +58,17 @@ QCheckBox#sectionCheck {
     letter-spacing: 0.5px;
 }
 QCheckBox#sectionCheck::indicator {
-    width: 16px; height: 16px;
-    border: none; border-radius: 4px;
-    background-color: #c7c7cc;
+    width: 0px; height: 0px;
+    border: none;
+    background: transparent;
 }
-QCheckBox#sectionCheck::indicator:checked { background-color: #34c759; }
-QCheckBox#sectionCheck::indicator:hover { background-color: #d1d1d6; }
-QCheckBox#sectionCheck::indicator:checked:hover { background-color: #2db84d; }
 
 /* ── Form Labels ── */
 QLabel#formLabel {
     color: #8e8e93;
     font-size: 12px;
-    padding-right: 4px;
+    padding: 3px 4px 3px 0px;
+    min-height: 18px;
 }
 
 /* ── Buttons ── */

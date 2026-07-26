@@ -7,7 +7,7 @@ Browses for output directory, shows progress, and triggers the pipeline.
 from __future__ import annotations
 
 from PyQt6.QtCore import QSize, pyqtSignal
-from PyQt6.QtGui import QPainter, QPen, QColor, QPixmap, QIcon
+from PyQt6.QtGui import QPainter, QColor, QPixmap, QIcon
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QLabel, QProgressBar, QPushButton, QVBoxLayout, QWidget,
@@ -48,9 +48,12 @@ class OutputSection(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._is_running = False
+        self.chk_launch_colmap = _section_header("Launch COLMAP GUI after build", checkable=True)
 
         ly = QVBoxLayout(self); ly.setContentsMargins(0, 0, 0, 0); ly.setSpacing(2)
+        ly.addWidget(self.chk_launch_colmap)
         ly.addWidget(_section_header("Output"))
+
 
         card, grid = _section_card(); row = 0
 
@@ -141,6 +144,10 @@ class OutputSection(QWidget):
             self.btn_run.setIcon(QIcon())          # clear icon
             self.btn_run.style().unpolish(self.btn_run)
             self.btn_run.style().polish(self.btn_run)
+
+    @property
+    def launch_colmap(self) -> bool:
+        return self.chk_launch_colmap.isChecked()
 
     def set_open_enabled(self, enabled: bool) -> None:
         self.btn_open_output.setEnabled(enabled)

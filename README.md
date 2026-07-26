@@ -17,6 +17,7 @@ uv sync --extra gpu          # NVIDIA + CUDA 13
 uv sync --extra directml     # Windows, any GPU
 uv sync --extra cpu          # CPU fallback
 
+# run COLMAP Forge GUI
 uv run colmapforge
 ```
 

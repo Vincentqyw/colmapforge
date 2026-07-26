@@ -65,11 +65,14 @@ class InputSection(QWidget):
     def set_clear_enabled(self, enabled: bool) -> None:
         self.btn_clear_input.setEnabled(enabled)
 
-    def refresh_list(self, items: list[tuple[QIcon, str]]) -> None:
-        """Rebuild the input list from (icon, label) pairs."""
+    def refresh_list(self, items: list[tuple[QIcon, str, str]]) -> None:
+        """Rebuild the input list from (icon, label, tooltip) triples."""
         self.input_list.clear()
-        for icon, label in items:
-            self.input_list.addItem(QListWidgetItem(icon, label))
+        for icon, label, tooltip in items:
+            item = QListWidgetItem(icon, label)
+            if tooltip:
+                item.setToolTip(tooltip)
+            self.input_list.addItem(item)
 
     # ── internals ──
 

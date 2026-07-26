@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -50,7 +51,7 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("COLMAP Forge")
-        self.setMinimumSize(960, 880); self.resize(1200, 960)
+        self.setMinimumSize(960, 900); self.resize(1200, 1000)
         self.setWindowIcon(make_app_icon())
 
         # ── shared state ──
@@ -290,11 +291,29 @@ class MainWindow(QMainWindow):
         sec = self._theme_color_secondary()
         items = []
         for p in self._video_paths:
-            items.append((_icon_video(sec), Path(p).name))
+            tip = self._video_tooltip(p)
+            items.append((_icon_video(sec), Path(p).name, tip))
         for p in self._image_paths:
             n = len(collect_image_files([p]))
-            items.append((_icon_folder(sec), f"{Path(p).name}  ({n})"))
+            items.append((_icon_folder(sec), f"{Path(p).name}  ({n})", ""))
         self._input_section.refresh_list(items)
+
+    def _video_tooltip(self, path: str) -> str:
+        """Build a rich tooltip showing video metadata."""
+        for vi in self._video_info:
+            if vi["path"] == path:
+                duration = vi.get("duration_seconds", 0)
+                mm, ss = int(duration // 60), int(duration % 60)
+                size_mb = vi.get("file_size_mb", 0)
+                return (
+                    f"Resolution: {vi['width']} × {vi['height']}\n"
+                    f"FPS: {vi['fps']:.2f}\n"
+                    f"Frames: {vi['total_frames']}\n"
+                    f"Duration: {mm}:{ss:02d}\n"
+                    f"Codec: {vi.get('fourcc', 'N/A')}\n"
+                    f"Size: {size_mb:.1f} MB"
+                )
+        return ""
 
     def _on_add_videos(self) -> None:
         from .utils import VIDEO_EXTENSIONS
@@ -323,6 +342,10 @@ class MainWindow(QMainWindow):
             if img is not None:
                 h, w = img.shape[:2]
                 self._update_image_dims(w, h)
+        elif self._video_info:
+            # No image folders yet — pull dims from first video's metadata
+            vi = self._video_info[0]
+            self._update_image_dims(vi["width"], vi["height"])
         self._preview.set_images(self._all_output_images)
         self._preview.refresh_preview()
 
@@ -372,7 +395,7 @@ class MainWindow(QMainWindow):
         img = cv2.imread(images[0])
         if img is not None:
             h, w = img.shape[:2]
-            self._update_image_dims(w, h)
+            self._camera_section.set_image_dims(w, h)
         masks_dir = os.path.join(os.path.dirname(images_dir), "masks")
         if os.path.isdir(masks_dir):
             stem_to_path = {Path(ip).stem: ip for ip in images}
@@ -489,8 +512,37 @@ class MainWindow(QMainWindow):
     def _on_pipeline_finished(self, db_path: str) -> None:
         images_dir = os.path.join(self._output_dir, "images")
         self._output_section.show_result(db_path, images_dir)
-        self.status_bar.showMessage(f"Database ready: {db_path}")
         self._preview.set_mask_cache(self._mask_cache)
+
+        if self._output_section.launch_colmap:
+            self._launch_colmap(db_path, images_dir)
+
+    def _launch_colmap(self, db_path: str, images_dir: str) -> None:
+        """Launch COLMAP GUI pointing at the built database and images."""
+        colmap_exe = shutil.which("colmap")
+        if colmap_exe is None:
+            self.status_bar.showMessage(
+                "COLMAP not found on PATH — install it or run manually: "
+                f"colmap gui --database_path {db_path} --image_path {images_dir}"
+            )
+            return
+
+        masks_dir = os.path.join(os.path.dirname(images_dir), "masks")
+
+        try:
+            subprocess.Popen(
+                [colmap_exe, "gui",
+                 "--database_path", db_path,
+                 "--image_path", images_dir,
+                 "--ImageReader.mask_path", masks_dir],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            self.status_bar.showMessage(
+                f"COLMAP launched: {db_path}"
+            )
+        except Exception as e:
+            logger.warning("Failed to launch COLMAP: %s", e)
+            self.status_bar.showMessage(f"COLMAP launch failed: {e}")
 
     def _on_pipeline_error(self, msg: str) -> None:
         self._output_section.reset()

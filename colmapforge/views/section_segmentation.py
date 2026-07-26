@@ -19,7 +19,7 @@ from .widgets import _combo, _dspin, _grid_row, _label, _section_card, _section_
 
 
 def _icon_clear(size: int = 14) -> QIcon:
-    """× icon for the clear-custom-classes button."""
+    """x icon for the clear-custom-classes button."""
     app = __import__("PyQt6.QtWidgets", fromlist=["QApplication"]).QApplication.instance()
     dpr = app.devicePixelRatio() if app else 1.0
     if dpr < 1.0: dpr = 1.0
@@ -106,12 +106,18 @@ class SegmentationSection(QWidget):
         self.lbl_custom_cls.setObjectName("customClassLabel")
         self.lbl_custom_cls.setToolTip("Click a class name to remove it")
         self.lbl_custom_cls.linkActivated.connect(self._remove_custom_class)
-        grid.addWidget(self.lbl_custom_cls, row, 1, 1, 2)
-
-        # ── Hint: custom class model compatibility ──
+        # Hint sits flush below custom class label (same row, spans full width)
+        cust_col = QWidget()
+        cust_layout = QVBoxLayout(cust_col)
+        cust_layout.setContentsMargins(0, 0, 0, 0)
+        cust_layout.setSpacing(0)
+        cust_layout.addWidget(self.lbl_custom_cls)
         self.lbl_custom_hint = QLabel("")
         self.lbl_custom_hint.setObjectName("hintLabel")
-        grid.addWidget(self.lbl_custom_hint, row + 1, 1, 1, 2)
+        cust_layout.addWidget(self.lbl_custom_hint)
+        grid.addWidget(cust_col, row, 1, 1, 2)
+
+        self._refresh_custom_display()  # hide lbl_custom_cls when empty on first load
 
         ly.addWidget(card)
 
@@ -233,6 +239,7 @@ class SegmentationSection(QWidget):
                 for c in self._custom_classes
             )
             self.lbl_custom_cls.setText(f"Custom: {tags}")
+            self.lbl_custom_cls.setVisible(True)
         else:
-            self.lbl_custom_cls.setText("")
+            self.lbl_custom_cls.setVisible(False)
         self.btn_clear_custom.setVisible(len(self._custom_classes) > 0)

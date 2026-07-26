@@ -133,3 +133,26 @@ def _icon_info(color: str = "#8e8e93") -> QIcon:
         p.setPen(pen)
         p.drawLine(QPointF(cx, cy - r * 0.18), QPointF(cx, cy + r * 0.50))
     return _make_icon(20, draw, color)
+
+
+def _icon_checkbox_unchecked(color: str = "#8e8e93") -> QIcon:
+    """Empty rounded-rect box — unchecked state."""
+    def draw(p: QPainter, s: int, c: QColor):
+        p.setPen(QPen(c, 1.8))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawRoundedRect(QRectF(1.5, 1.5, s - 3.0, s - 3.0), 4.0, 4.0)
+    return _make_icon(16, draw, color)
+
+
+def _icon_checkbox_checked(color: str = "#30d158") -> QIcon:
+    """Filled rounded-rect box + white checkmark — checked state."""
+    def draw(p: QPainter, s: int, c: QColor):
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(c))
+        p.drawRoundedRect(1, 1, s - 2, s - 2, 4, 4)
+        # white checkmark
+        p.setPen(QPen(QColor("#ffffff"), 2.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+        m = s * 0.22
+        p.drawLine(QPointF(m, s * 0.55), QPointF(s * 0.40, s - m - 1))
+        p.drawLine(QPointF(s * 0.40, s - m - 1), QPointF(s - m, m + 1))
+    return _make_icon(16, draw, color)
