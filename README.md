@@ -1,60 +1,130 @@
 # COLMAP Forge
 
-A PyQt6-based wizard tool that prepares video and image data for [COLMAP](https://github.com/colmap/colmap) Structure-from-Motion pipelines.
+<p align="center">
+  <img src="assets/colmapforge-gui.png" alt="COLMAP Forge GUI" width="800">
+</p>
 
-## Features
-
-- **Video frame extraction** — configurable frame rates, time ranges, intervals
-- **Image resizing** — max dimension or exact size with aspect ratio preservation
-- **SAM-based dynamic object masking** — segment people, vehicles, sky, water, etc.
-- **18 COLMAP camera models** — from SIMPLE_PINHOLE to EQUIRECTANGULAR
-- **COLMAP database.db export** — ready for one-click import into COLMAP
+A PyQt6 desktop wizard that prepares video and image data for [COLMAP](https://github.com/colmap/colmap) Structure-from-Motion frame extraction, resizing, SAM-based dynamic object masking, and `database.db` export.
 
 ## Quick Start
 
 ```bash
-uv sync --extra gpu          # NVIDIA + CUDA 13 (recommended)
-# uv sync --extra directml  # Windows, any GPU (AMD/Intel/NVIDIA)
-# uv sync --extra cpu       # pure CPU fallback
+git clone https://github.com/Vincentqyw/colmapforge.git
+cd colmapforge
+
+# Install with your GPU backend (pick ONE)
+uv sync --extra gpu          # NVIDIA + CUDA 13
+uv sync --extra directml     # Windows, any GPU
+uv sync --extra cpu          # CPU fallback
 
 uv run colmapforge
-# uv run colmapforge --log-level DEBUG
 ```
 
-> **First run downloads the SkyWater model (~48 MB) from
-> [huggingface.co/Realcat/skywater_seg](https://huggingface.co/Realcat/skywater_seg)
-> and caches it in `~/.cache/huggingface/hub`** — no manual setup needed.
-> Subsequent runs load from cache instantly.
+> **Zero-config models** — 16 SAM variants + SkyWater download from
+> HuggingFace on first use and cache to `~/.colmapforge/models/`.
+
+## Workflow
+
+1. **Input** — Add video files and/or image folders
+2. **Frame Extraction** — Sample frames by interval, FPS, or time range
+3. **Resize** — Downscale with max-dimension or fixed-factor modes
+4. **Segmentation** — SAM (text-prompt or grid-prompt) or SkyWater (fast sky/water/people)
+5. **Camera** — Choose from 18 COLMAP camera models (SIMPLE_RADIAL default)
+6. **Build** — One-click `database.db` + masked images export
+
+## Features
+
+- **4-stage pipeline** — extraction → resize → masking → database, chained async via `QThreadPool`
+- **Zero-config models** — 16 SAM/SAM2/SAM3 + SkyWater auto-download on first run
+- **SAM1 / SAM2 / SAM3** — auto-detected from ONNX graph inputs; SAM3 supports text prompts
+- **SkyWater** — SegFormer-B2 for fast sky/water/person segmentation (~48 MB)
+- **18 camera models** — SIMPLE_PINHOLE through EQUIRECTANGULAR, with prior focal length
+- **GPU auto-detect** — CUDA → DirectML → CPU fallback; toolbar indicator shows active backend
+- **Dark / Light themes** — Apple HIG-inspired `QPalette` + QSS, toggle with Ctrl+T
+- **Preview panel** — real-time mask overlay with opacity control
+
+## Available Models
+
+All models are ONNX-based and download on first use. The SAM variant (1/2/3)
+is auto-detected from the ONNX graph — you don't need to pick.
+
+<details>
+<summary><b>SAM1</b> (7 models)</summary>
+
+| Model | Size |
+|-------|------|
+| MobileSAM | ~45 MB |
+| ViT-B | ~380 MB |
+| ViT-B (Quant) | ~190 MB |
+| ViT-L | ~1.2 GB |
+| ViT-L (Quant) | ~340 MB |
+| ViT-H | ~2.5 GB |
+| ViT-H (Quant) | ~670 MB |
+
+</details>
+
+<details>
+<summary><b>SAM2</b> (4 models)</summary>
+
+| Model | Size |
+|-------|------|
+| Hiera-Tiny | ~160 MB |
+| Hiera-Small | ~185 MB |
+| Hiera-Base+ | ~325 MB |
+| Hiera-Large | ~900 MB |
+
+</details>
+
+<details>
+<summary><b>SAM 2.1</b> (4 models)</summary>
+
+| Model | Size |
+|-------|------|
+| Hiera-Tiny | ~160 MB |
+| Hiera-Small | ~185 MB |
+| Hiera-Base+ | ~325 MB |
+| Hiera-Large | ~900 MB |
+
+</details>
+
+<details>
+<summary><b>SAM3</b> (1 model) + <b>SkyWater</b> (1 model)</summary>
+
+| Model | Size |
+|-------|------|
+| SAM3 ViT-H | ~3.0 GB |
+| SkyWater SegFormer-B2 | ~48 MB |
+
+</details>
 
 ## ONNX Runtime Backend
 
+<details>
+<summary>GPU setup details — click to expand</summary>
+
 Three mutually-exclusive ONNX Runtime wheels exist — **install only one**:
 
-| Extra | Package | When to use |
-|---|---|---|
-| `[gpu]` | `onnxruntime-gpu` | NVIDIA GPU + CUDA 13 Toolkit installed |
-| `[directml]` | `onnxruntime-directml` | Windows, any GPU (AMD/Intel/NVIDIA) |
-| `[cpu]` | `onnxruntime` | No GPU, or unsupported platform |
+| Extra | Package | When |
+|-------|---------|------|
+| `[gpu]` | `onnxruntime-gpu` | NVIDIA + CUDA 13 Toolkit |
+| `[directml]` | `onnxruntime-directml` | Windows, any GPU |
+| `[cpu]` | `onnxruntime` | No GPU or unsupported |
 
-> **⚠️ Critical:** Installing more than one wheel silently breaks GPU
-> acceleration — their shared `site-packages/onnxruntime/` files overwrite
-> each other and CUDA disappears from `get_available_providers()` without
-> error. The app auto-detects and self-heals this at startup. To prevent it
-> from happening, `pyproject.toml` blocks osam's transitive `onnxruntime`
-> dependency via `[[tool.uv.override-dependencies]]`.
+> **⚠️** Installing multiple wheels silently breaks GPU acceleration —
+> their shared `site-packages/onnxruntime/` files overwrite each other.
 
-The toolbar shows a live GPU status indicator (green = CUDA/DirectML,
-orange = CPU only, red = broken). Click it for full diagnostics.
+The toolbar shows a live GPU status indicator: green = CUDA/DirectML,
+orange = CPU, red = broken. Click it for full diagnostics.
 
-### Switching backends
+**Switching backends:**
 
 ```bash
-uv sync --extra directml   # switch from GPU to DirectML
-uv sync --extra cpu        # switch to pure CPU
-uv sync --extra gpu        # switch back to GPU
+uv sync --extra directml   # GPU → DirectML
+uv sync --extra cpu        # → CPU
+uv sync --extra gpu        # → CUDA
 ```
 
-If stale files persist, force-clean:
+**Force-clean stale files:**
 
 ```powershell
 uv pip uninstall onnxruntime onnxruntime-gpu onnxruntime-directml
@@ -62,20 +132,21 @@ Remove-Item .venv/Lib/site-packages/onnxruntime -Recurse -Force
 uv sync --extra gpu
 ```
 
-### NVIDIA CUDA requirements (for `[gpu]`)
+**NVIDIA CUDA (for `[gpu]`):**
 
-- NVIDIA driver ≥ 580 (CUDA 13)
-- CUDA 13.x Toolkit on PATH (provides `cudart64_13.dll`)
-- cuDNN 9 + cuBLAS 13 are bundled in the `onnxruntime-gpu` wheel
+- Driver ≥ 580 (CUDA 13)
+- CUDA 13.x Toolkit on PATH (`cudart64_13.dll`)
+- cuDNN 9 + cuBLAS 13 bundled in `onnxruntime-gpu`
 
-## Workflow
+</details>
 
-1. **Input** — Add video files and/or image folders
-2. **Frame Extraction** — Configure frame sampling from videos
-3. **Resize** — Optionally resize images (recommended max 2000px)
-4. **Segmentation** — Use SAM to mask dynamic objects
-5. **Camera Model** — Select COLMAP camera model (default: SIMPLE_RADIAL)
-6. **Export** — Generate `database.db` + images folder
+## Keyboard Shortcuts
+
+| Shortcut | Action |
+|----------|--------|
+| `Ctrl + O` | Add images |
+| `Ctrl + B` | Build COLMAP database |
+| `Ctrl + T` | Toggle dark/light theme |
 
 ## Requirements
 
@@ -83,3 +154,8 @@ uv sync --extra gpu
 - PyQt6 ≥ 6.6
 - OpenCV ≥ 4.8
 - ONNX Runtime (see [above](#onnx-runtime-backend))
+- `huggingface_hub` ≥ 0.24 (for SkyWater download)
+
+## License
+
+MIT — see [LICENSE](LICENSE) for details.

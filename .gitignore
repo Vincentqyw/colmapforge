@@ -5,3 +5,4 @@
 # Logo / UI preview artifacts (rendered PNGs + HTML galleries, not source)
 .logo_preview/
 .logo_candidates/
+.ruff_cache/
