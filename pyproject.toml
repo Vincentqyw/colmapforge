@@ -8,7 +8,7 @@ license = { text = "MIT" }
 authors = [{ name = "Vincent Qin" }]
 
 dependencies = [
-    "opencv-python>=4.8",
+    "opencv-python-headless>=4.8",
     "numpy>=1.24",
     "onnx>=1.14",
     "pyyaml>=6.0",

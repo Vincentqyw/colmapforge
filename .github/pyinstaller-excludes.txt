@@ -1,0 +1,57 @@
+# PyInstaller --exclude-module list for COLMAP Forge.
+# One module per line.  Lines starting with # are ignored.
+# Used by all three CI workflows to strip unused Qt6 / stdlib from the bundle.
+#
+# Qt6 modules we never import — keep only QtCore, QtGui, QtWidgets.
+PyQt6.QtWebEngineCore
+PyQt6.QtWebEngineWidgets
+PyQt6.QtWebEngineQuick
+PyQt6.QtPdf
+PyQt6.QtPdfWidgets
+PyQt6.QtDesigner
+PyQt6.Qt3DCore
+PyQt6.Qt3DRender
+PyQt6.Qt3DInput
+PyQt6.Qt3DLogic
+PyQt6.Qt3DAnimation
+PyQt6.Qt3DExtras
+PyQt6.QtQuick
+PyQt6.QtQuickWidgets
+PyQt6.QtQuick3D
+PyQt6.QtQml
+PyQt6.QtQmlModels
+PyQt6.QtSensors
+PyQt6.QtSerialPort
+PyQt6.QtSvgWidgets
+PyQt6.QtTest
+PyQt6.QtTextToSpeech
+PyQt6.QtBluetooth
+PyQt6.QtNfc
+PyQt6.QtMultimedia
+PyQt6.QtMultimediaWidgets
+PyQt6.QtPositioning
+PyQt6.QtSpatialAudio
+PyQt6.QtStateMachine
+PyQt6.QtWebChannel
+PyQt6.QtWebSockets
+PyQt6.QtCharts
+PyQt6.QtDataVisualization
+PyQt6.QtGraphs
+PyQt6.QtHttpServer
+PyQt6.QtRemoteObjects
+PyQt6.QtScxml
+PyQt6.QtHelp
+PyQt6.QtLocation
+PyQt6.QtLabsAnimation
+PyQt6.QtLabsFolderListModel
+PyQt6.QtLabsQmlModels
+PyQt6.QtLabsSettings
+PyQt6.QtLabsSharedImage
+PyQt6.QtLabsWavefrontMesh
+
+# stdlib modules never imported by this app
+tkinter
+multiprocessing
+distutils
+ensurepip
+pydoc

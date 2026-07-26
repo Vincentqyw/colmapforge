@@ -32,10 +32,17 @@ jobs:
       - name: Install PyInstaller
         run: uv pip install pyinstaller
 
+      - name: Install UPX (binary compressor)
+        uses: crazy-max/ghaction-upx@v3
+        with:
+          install-only: true
+
       - name: Build executable
         # --windowed on macOS creates a .app bundle automatically.
         # Linux/macOS --add-data separator is ':'
         run: |
+          excludes=$(grep -v '^\s*#' .github/pyinstaller-excludes.txt | grep -v '^\s*$' | sed 's/^/--exclude-module /')
+          # shellcheck disable=SC2086
           uv run pyinstaller --noconfirm --windowed --name "COLMAP-Forge" \
             --add-data "colmapforge/views/styles:colmapforge/views/styles" \
             --add-data "colmapforge/configs:colmapforge/configs" \
@@ -43,6 +50,7 @@ jobs:
             --collect-all cv2 \
             --collect-all onnxruntime \
             --hidden-import darkdetect \
+            $excludes \
             run.py
 
       - name: Package as zip
