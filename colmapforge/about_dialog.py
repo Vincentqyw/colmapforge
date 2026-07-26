@@ -1,5 +1,5 @@
 """
-COLMAP Preprocessor — About dialog.
+COLMAP Forge — About dialog.
 
 Apple-style modal dialog: logo + project info + author + models +
 keyboard shortcuts + license. Reuses the app's QSS section-card styling
@@ -16,13 +16,13 @@ from PyQt6.QtWidgets import (
 from .logo import make_logo_pixmap
 
 
-GITHUB_URL = "https://github.com/vincentqyw/colmap-preprocessor"
+GITHUB_URL = "https://github.com/vincentqyw/colmapforge"
 
 
 def _app_version() -> str:
     """Resolve installed package version, falling back to 1.0.0."""
     try:
-        from colmap_preprocessor import __version__
+        from colmapforge import __version__
         return __version__ or "1.0.0"
     except Exception:
         return "1.0.0"
@@ -104,7 +104,7 @@ class AboutDialog(QDialog):
         row.addWidget(logo, 0, Qt.AlignmentFlag.AlignTop)
 
         col = QVBoxLayout(); col.setSpacing(1)
-        name = QLabel("COLMAP Preprocessor"); name.setObjectName("appTitle")
+        name = QLabel("COLMAP Forge"); name.setObjectName("appTitle")
         ver = QLabel(f"Version {_app_version()}"); ver.setObjectName("hintLabel")
         tag = QLabel("SAM-based masking for COLMAP SfM"); tag.setObjectName("hintLabel")
         col.addWidget(name); col.addWidget(ver); col.addWidget(tag)
@@ -150,7 +150,7 @@ class AboutDialog(QDialog):
         m2 = QLabel("<b>SAM / SAM2 / SAM3</b> (ONNX)")
         m2.setTextFormat(Qt.TextFormat.RichText)
         d2 = QLabel("General-purpose interactive segmentation backends. Loaded "
-                    "from ~/.anylabeling_data/models/ on demand.")
+                    "from ~/.colmapforge/models/ on demand.")
         d2.setWordWrap(True); d2.setObjectName("hintLabel")
         l2 = self._link_label("https://huggingface.co/vietanhdev/segment-anything-3-onnx-models")
         body.addWidget(m2); body.addWidget(d2); body.addWidget(l2)

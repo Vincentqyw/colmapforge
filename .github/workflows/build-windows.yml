@@ -1,4 +1,4 @@
-# Build COLMAP Preprocessor for Windows — produces a distributable .zip
+# Build COLMAP Forge for Windows — produces a distributable .zip
 # Triggered by version tags (v*) or manual dispatch.
 name: Build (Windows)
 
@@ -34,9 +34,9 @@ jobs:
       - name: Build executable
         # Windows --add-data separator is ';'
         run: |
-          uv run pyinstaller --noconfirm --windowed --name "COLMAP-Preprocessor" `
-            --add-data "colmap_preprocessor/views/styles;colmap_preprocessor/views/styles" `
-            --collect-submodules colmap_preprocessor `
+          uv run pyinstaller --noconfirm --windowed --name "COLMAP-Forge" `
+            --add-data "colmapforge/views/styles;colmapforge/views/styles" `
+            --collect-submodules colmapforge `
             --collect-all cv2 `
             --collect-all onnxruntime `
             --hidden-import darkdetect `
@@ -45,19 +45,19 @@ jobs:
       - name: Package as zip
         shell: pwsh
         run: |
-          Compress-Archive -Path dist/COLMAP-Preprocessor/* `
-            -DestinationPath COLMAP-Preprocessor-windows-x64.zip -Force
+          Compress-Archive -Path dist/COLMAP-Forge/* `
+            -DestinationPath COLMAP-Forge-windows-x64.zip -Force
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: COLMAP-Preprocessor-windows-x64
-          path: COLMAP-Preprocessor-windows-x64.zip
+          name: COLMAP-Forge-windows-x64
+          path: COLMAP-Forge-windows-x64.zip
           retention-days: 30
 
       - name: Upload to GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: COLMAP-Preprocessor-windows-x64.zip
+          files: COLMAP-Forge-windows-x64.zip
           generate_release_notes: true

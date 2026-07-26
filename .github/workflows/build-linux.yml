@@ -1,4 +1,4 @@
-# Build COLMAP Preprocessor for Linux — produces a distributable .tar.gz
+# Build COLMAP Forge for Linux — produces a distributable .tar.gz
 # Triggered by version tags (v*) or manual dispatch.
 name: Build (Linux)
 
@@ -44,9 +44,9 @@ jobs:
       - name: Build executable
         # Linux/macOS --add-data separator is ':'
         run: |
-          uv run pyinstaller --noconfirm --windowed --name "COLMAP-Preprocessor" \
-            --add-data "colmap_preprocessor/views/styles:colmap_preprocessor/views/styles" \
-            --collect-submodules colmap_preprocessor \
+          uv run pyinstaller --noconfirm --windowed --name "COLMAP-Forge" \
+            --add-data "colmapforge/views/styles:colmapforge/views/styles" \
+            --collect-submodules colmapforge \
             --collect-all cv2 \
             --collect-all onnxruntime \
             --hidden-import darkdetect \
@@ -55,18 +55,18 @@ jobs:
       - name: Package as tar.gz
         run: |
           cd dist
-          tar -czf ../COLMAP-Preprocessor-linux-x64.tar.gz COLMAP-Preprocessor
+          tar -czf ../COLMAP-Forge-linux-x64.tar.gz COLMAP-Forge
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: COLMAP-Preprocessor-linux-x64
-          path: COLMAP-Preprocessor-linux-x64.tar.gz
+          name: COLMAP-Forge-linux-x64
+          path: COLMAP-Forge-linux-x64.tar.gz
           retention-days: 30
 
       - name: Upload to GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: COLMAP-Preprocessor-linux-x64.tar.gz
+          files: COLMAP-Forge-linux-x64.tar.gz
           generate_release_notes: true

@@ -31,7 +31,7 @@ class AppToolbar(QWidget):
         ly.addWidget(self._lbl_logo)
         ly.addSpacing(8)
 
-        title = QLabel("COLMAP Preprocessor"); title.setObjectName("appTitle")
+        title = QLabel("COLMAP Forge"); title.setObjectName("appTitle")
         ly.addWidget(title); ly.addStretch()
 
         self._lbl_img_count = QLabel("Images: 0"); self._lbl_img_count.setObjectName("statusInfo")
@@ -56,7 +56,7 @@ class AppToolbar(QWidget):
         self.btn_about.setObjectName("themeBtn")
         self.btn_about.setIconSize(QSize(20, 20))
         self.btn_about.setIcon(_icon_info())
-        self.btn_about.setToolTip("About COLMAP Preprocessor")
+        self.btn_about.setToolTip("About COLMAP Forge")
         self.btn_about.clicked.connect(self.about_clicked.emit); ly.addWidget(self.btn_about)
 
     # ── public API ──

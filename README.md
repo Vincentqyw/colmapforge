@@ -1,4 +1,4 @@
-# COLMAP Preprocessor
+# COLMAP Forge
 
 A PyQt6-based wizard tool that prepares video and image data for [COLMAP](https://github.com/colmap/colmap) Structure-from-Motion pipelines.
 
@@ -17,8 +17,8 @@ uv sync --extra gpu          # NVIDIA + CUDA 13 (recommended)
 # uv sync --extra directml  # Windows, any GPU (AMD/Intel/NVIDIA)
 # uv sync --extra cpu       # pure CPU fallback
 
-uv run colmap-prep
-# uv run colmap-prep --log-level DEBUG
+uv run colmapforge
+# uv run colmapforge --log-level DEBUG
 ```
 
 > **First run downloads the SkyWater model (~48 MB) from

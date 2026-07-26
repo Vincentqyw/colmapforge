@@ -45,11 +45,11 @@ logger = logging.getLogger(__name__)
 
 
 class MainWindow(QMainWindow):
-    """COLMAP Preprocessor — pixel-aligned, card-based, Apple-style."""
+    """COLMAP Forge — pixel-aligned, card-based, Apple-style."""
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("COLMAP Preprocessor")
+        self.setWindowTitle("COLMAP Forge")
         self.setMinimumSize(960, 880); self.resize(1200, 960)
         self.setWindowIcon(make_app_icon())
 
@@ -244,6 +244,7 @@ class MainWindow(QMainWindow):
         # Output section
         self._output_section.browse_requested.connect(self._browse_output)
         self._output_section.run_clicked.connect(self._run_pipeline)
+        self._output_section.stop_clicked.connect(self._stop_pipeline)
         self._output_section.open_output_requested.connect(self._open_output)
 
         # Pipeline
@@ -391,62 +392,9 @@ class MainWindow(QMainWindow):
     # ═══════════════════════════════════════════════════════════════════
 
     def _load_models(self) -> None:
-        import yaml
-        models_root = os.path.join(os.path.expanduser("~"), "anylabeling_data", "models")
-        self._model_configs = []
-        if os.path.isdir(models_root):
-            for model_name in sorted(os.listdir(models_root)):
-                model_dir = os.path.join(models_root, model_name)
-                cfg_path = os.path.join(model_dir, "config.yaml")
-                if not os.path.isfile(cfg_path): continue
-                try:
-                    with open(cfg_path) as f: cfg = yaml.safe_load(f)
-                except Exception: continue
-                if cfg.get("type") not in ("segment_anything", "segment_anything_model"): continue
-                onnx_files = sorted(f for f in os.listdir(model_dir) if f.endswith(".onnx"))
-                encoder = cfg.get("encoder_model_path", "")
-                decoder = cfg.get("decoder_model_path", "")
-                lang = cfg.get("language_encoder_path", "")
-                ep = os.path.join(model_dir, encoder) if encoder else ""
-                dp = os.path.join(model_dir, decoder) if decoder else ""
-                lp = os.path.join(model_dir, lang) if lang else ""
-                if not dp or not os.path.isfile(dp):
-                    decs = [f for f in onnx_files if "decoder" in f.lower()]
-                    if decs: dp = os.path.join(model_dir, decs[0])
-                if not ep or not os.path.isfile(ep):
-                    encs = [f for f in onnx_files if "encoder" in f.lower() and "language" not in f.lower()]
-                    if encs: ep = os.path.join(model_dir, encs[0])
-                if not lp or not os.path.isfile(lp):
-                    langs = [f for f in onnx_files if "language" in f.lower() or "text" in f.lower()]
-                    if langs: lp = os.path.join(model_dir, langs[0])
-                if not os.path.isfile(dp): continue
-                merged = dict(cfg); merged["encoder_model_path"] = ep; merged["decoder_model_path"] = dp
-                if lp and os.path.isfile(lp): merged["language_encoder_path"] = lp
-                self._model_configs.append(merged)
-
+        from .model_downloader import discover_models
+        self._model_configs = discover_models()
         self._seg_section.populate_models(self._model_configs)
-
-        # SkyWater entry
-        from .model_downloader import resolve_cached_path, is_huggingface_hub_available
-        sw_logical_name = "skywater_segformer_b2_fp16"
-        sw_cached_path = resolve_cached_path(sw_logical_name)
-        if sw_cached_path:
-            sw_cfg = {
-                "type": "skywater", "name": "SkyWater SegFormer-B2",
-                "display_name": "SkyWater (Sky/Water/Person) [FAST]",
-                "model_path": sw_cached_path, "encoder_model_path": sw_cached_path,
-                "decoder_model_path": sw_cached_path, "logical_name": sw_logical_name,
-            }
-        else:
-            download_tag = "[Download ~48 MB]" if is_huggingface_hub_available() else "[HF Hub missing]"
-            sw_cfg = {
-                "type": "skywater", "name": "SkyWater SegFormer-B2",
-                "display_name": f"SkyWater (Sky/Water/Person) {download_tag}",
-                "model_path": None, "encoder_model_path": None,
-                "decoder_model_path": None, "logical_name": sw_logical_name,
-            }
-        self._seg_section.add_model_item(sw_cfg["display_name"], sw_cfg)
-
         self._toolbar.set_model_count(self._seg_section.cmb_sam_model.count())
         self._seg_section.apply_preset()
 
@@ -519,6 +467,12 @@ class MainWindow(QMainWindow):
 
         config = self._gather_config()
         self._pipeline.run(config)
+
+    def _stop_pipeline(self) -> None:
+        """Cancel the running pipeline."""
+        self._pipeline.cancel()
+        self._output_section.set_busy(False)
+        self.status_bar.showMessage("Pipeline stopped by user")
 
     def _on_pipeline_progress(self, pct: int, msg: str) -> None:
         self._output_section.set_progress(pct, msg)

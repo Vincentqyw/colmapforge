@@ -1,0 +1,1 @@
+"""Model registries bundled with the application."""

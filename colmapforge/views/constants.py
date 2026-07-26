@@ -1,5 +1,5 @@
 """
-Design constants and data for COLMAP Preprocessor UI.
+Design constants and data for COLMAP Forge UI.
 """
 
 # ── Design Constants ──────────────────────────────────────────────────

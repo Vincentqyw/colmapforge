@@ -414,6 +414,24 @@ class SegmentationWorker(QRunnable):
                 target_classes=self._target_classes,
             )
         else:
+            # ── SAM: auto-download zip from HuggingFace on first use ──
+            has_downloaded = model_config.get("has_downloaded", True)
+            decoder_path = model_config.get("decoder_model_path", "")
+            logical_name = model_config.get("logical_name", "")
+            if (not has_downloaded or not decoder_path or not os.path.isfile(decoder_path)) and logical_name:
+                try:
+                    from .model_downloader import download_zip_model
+                    def _on_progress(msg: str, done: int, total: int) -> None:
+                        pct = 0 if total <= 0 else int(100 * done / total)
+                        self.signals.progress.emit(pct, msg)
+                    self.signals.progress.emit(0, f"Downloading SAM model: {logical_name}...")
+                    updated = download_zip_model(logical_name, progress_callback=_on_progress)
+                    model_config.update(updated)
+                except Exception as e:
+                    logger.exception("SAM model download failed")
+                    self.signals.error.emit(f"SAM model download failed: {e}")
+                    return
+
             self._worker = SAMWorker(
                 image_paths=self._image_paths,
                 mask_output_dir=self._mask_output_dir,

@@ -1,5 +1,5 @@
 """
-COLMAP Preprocessor — application logo.
+COLMAP Forge — application logo.
 
 Concept: isometric cube — hexagon silhouette + 3 internal edges + vertex dots.
 Represents 3D structure / reconstruction — the core of COLMAP.

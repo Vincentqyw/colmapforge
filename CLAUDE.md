@@ -6,8 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 uv sync                          # Install all dependencies
-uv run colmap-prep               # Launch the GUI
-uv run colmap-prep --log-level DEBUG  # Launch with debug logging
+uv run colmapforge               # Launch the GUI
+uv run colmapforge --log-level DEBUG  # Launch with debug logging
 uv run ruff check .              # Lint the project
 ```
 

@@ -228,8 +228,10 @@ class PipelineOrchestrator(QObject):
 
             if not is_sw:
                 dp = model_cfg.get("decoder_model_path", "")
-                if not dp or not os.path.isfile(dp):
-                    self._on_error(f"Model file not found: {dp}"); return
+                # Allow not-yet-downloaded models — the worker downloads them.
+                if model_cfg.get("has_downloaded") is not False:
+                    if not dp or not os.path.isfile(dp):
+                        self._on_error(f"Model file not found: {dp}"); return
             else:
                 sw_path = model_cfg.get("model_path")
                 if not sw_path or not os.path.isfile(sw_path):

@@ -1,5 +1,5 @@
 """
-Programmatic icon generation for COLMAP Preprocessor.
+Programmatic icon generation for COLMAP Forge.
 
 Real pixel icons painted at runtime. devicePixelRatio-aware for crisp HiDPI.
 Zero font dependency → cross-platform identical rendering.
