@@ -88,12 +88,20 @@ is auto-detected from the ONNX graph — you don't need to pick.
 </details>
 
 <details>
-<summary><b>SAM3</b> (1 model) + <b>SkyWater</b> (1 model)</summary>
+<summary><b>SAM3</b> (1 model)</summary>
 
 | Model | Size |
 |-------|------|
 | SAM3 ViT-H | ~3.0 GB |
-| SkyWater SegFormer-B2 | ~48 MB |
+
+</details>
+
+<details>
+<summary><b>SkyWater</b> (1 model — <a href="https://github.com/Vincentqyw/skywater_seg">SegFormer</a>)</summary>
+
+| Model | Size |
+|-------|------|
+| [SkyWater](https://github.com/Vincentqyw/skywater_seg) SegFormer-B2 | ~48 MB |
 
 </details>
 
