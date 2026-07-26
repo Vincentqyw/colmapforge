@@ -32,11 +32,6 @@ jobs:
       - name: Install PyInstaller
         run: uv pip install pyinstaller
 
-      - name: Install UPX (binary compressor)
-        uses: crazy-max/ghaction-upx@v3
-        with:
-          install-only: true
-
       - name: Build executable
         # --windowed on macOS creates a .app bundle automatically.
         # Linux/macOS --add-data separator is ':'
