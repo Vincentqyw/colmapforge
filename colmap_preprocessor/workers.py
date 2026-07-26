@@ -349,9 +349,22 @@ class SkyWaterWorker(QRunnable):
 class SegmentationWorker(QRunnable):
     """Dispatches to SAM or SkyWater worker based on model config."""
 
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(
+        self,
+        image_paths: list[str],
+        mask_output_dir: str,
+        model_config: dict,
+        target_classes: list[str],
+        confidence_threshold: float = 0.3,
+        max_inference_dim: int = 0,
+    ) -> None:
         super().__init__()
-        self._args = args; self._kwargs = kwargs
+        self._image_paths = image_paths
+        self._mask_output_dir = mask_output_dir
+        self._model_config = model_config
+        self._target_classes = target_classes
+        self._confidence_threshold = confidence_threshold
+        self._max_inference_dim = max_inference_dim
         self.signals = SegmentationSignals()
         self._worker = None; self._running = False
 
@@ -359,7 +372,7 @@ class SegmentationWorker(QRunnable):
     def run(self) -> None:
         self._running = True; self.signals.started.emit()
 
-        model_config = self._kwargs.get("model_config", {})
+        model_config = self._model_config
         model_path = model_config.get("model_path", "")
 
         is_skywater = (
@@ -377,7 +390,7 @@ class SegmentationWorker(QRunnable):
                 try:
                     from .model_downloader import download_model
                     self.signals.progress.emit(
-                        0, f"Downloading SkyWater model from HuggingFace..."
+                        0, "Downloading SkyWater model from HuggingFace..."
                     )
 
                     def _on_progress(msg: str, done: int, total: int) -> None:
@@ -395,19 +408,19 @@ class SegmentationWorker(QRunnable):
                     return
 
             self._worker = SkyWaterWorker(
-                image_paths=self._kwargs["image_paths"],
-                mask_output_dir=self._kwargs["mask_output_dir"],
+                image_paths=self._image_paths,
+                mask_output_dir=self._mask_output_dir,
                 model_path=model_path,
-                target_classes=self._kwargs["target_classes"],
+                target_classes=self._target_classes,
             )
         else:
             self._worker = SAMWorker(
-                image_paths=self._kwargs["image_paths"],
-                mask_output_dir=self._kwargs["mask_output_dir"],
+                image_paths=self._image_paths,
+                mask_output_dir=self._mask_output_dir,
                 model_config=model_config,
-                target_classes=self._kwargs["target_classes"],
-                confidence_threshold=self._kwargs.get("confidence_threshold", 0.3),
-                max_inference_dim=self._kwargs.get("max_inference_dim", 0),
+                target_classes=self._target_classes,
+                confidence_threshold=self._confidence_threshold,
+                max_inference_dim=self._max_inference_dim,
             )
 
         self._worker.signals = self.signals

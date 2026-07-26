@@ -1,9 +1,12 @@
+import logging
 from typing import Any
 
 import cv2
 import numpy as np
 
 from ..onnx_utils import create_inference_session
+
+logger = logging.getLogger(__name__)
 
 
 class SegmentAnything3ONNX:
@@ -248,6 +251,11 @@ class SAM3LanguageEncoder:
         Warning: the model will produce near-random language features when
         this fallback is used.  Install ``osam`` for correct tokenisation.
         """
+        logger.warning(
+            "SAM3 language encoder using all-zeros fallback tokenizer — "
+            "text prompts will produce near-random results. "
+            "Install 'osam' for correct tokenization."
+        )
         return np.zeros((len(texts), context_length), dtype=np.int64)
 
     def __call__(self, text: str) -> list[np.ndarray]:

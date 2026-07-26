@@ -8,7 +8,6 @@ so it stays visually consistent with the main window.
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import (
     QDialog, QGridLayout, QHBoxLayout, QLabel, QPushButton,
     QScrollArea, QVBoxLayout, QWidget,
@@ -23,9 +22,8 @@ GITHUB_URL = "https://github.com/vincentqyw/colmap-preprocessor"
 def _app_version() -> str:
     """Resolve installed package version, falling back to 1.0.0."""
     try:
-        from importlib.metadata import version
-        v = version("colmap-preprocessor")
-        return v or "1.0.0"
+        from colmap_preprocessor import __version__
+        return __version__ or "1.0.0"
     except Exception:
         return "1.0.0"
 

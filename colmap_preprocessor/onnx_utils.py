@@ -1,7 +1,7 @@
 """ONNX Runtime provider selection utilities.
 
 Prefers GPU acceleration (CUDA → DirectML) and falls back to CPU.
-TensorRT is excluded by default (stability issues with dynamic shapes).
+TensorRT is excluded (stability issues with dynamic shapes).
 
 This module also exposes :func:`diagnose` which inspects the local
 onnxruntime installation and surfaces the *silent overwrite* failure mode
@@ -70,12 +70,11 @@ def require_onnxruntime() -> None:
 
 
 def get_onnx_providers(
-    *, allow_tensorrt: bool = False, force_cpu: bool = False
+    *, force_cpu: bool = False
 ) -> list[str]:
     """Return a prioritized list of ONNX Runtime execution providers.
 
     Order: CUDAExecutionProvider → DirectML → CPUExecutionProvider.
-    TensorRT is excluded unless ``allow_tensorrt=True``.
     If ``force_cpu=True``, only CPUExecutionProvider is returned.
     """
     require_onnxruntime()
@@ -89,23 +88,18 @@ def get_onnx_providers(
     # 2) DirectML (Windows GPU fallback when CUDA is unavailable)
     if "DmlExecutionProvider" in available:
         ordered.append("DmlExecutionProvider")
-    # 3) TensorRT (opt-in only — frequently breaks with dynamic shapes)
-    if allow_tensorrt and "TensorrtExecutionProvider" in available:
-        ordered.append("TensorrtExecutionProvider")
-    # 4) CPU (always available, guaranteed fallback)
+    # 3) CPU (always available, guaranteed fallback)
     if "CPUExecutionProvider" not in ordered:
         ordered.append("CPUExecutionProvider")
     return ordered
 
 
 def create_inference_session(
-    model_path: str, *, allow_tensorrt: bool = False, force_cpu: bool = False
+    model_path: str, *, force_cpu: bool = False
 ):
     """Create an ONNX Runtime InferenceSession with the best available provider."""
     require_onnxruntime()
-    providers = get_onnx_providers(
-        allow_tensorrt=allow_tensorrt, force_cpu=force_cpu
-    )
+    providers = get_onnx_providers(force_cpu=force_cpu)
     return _ort.InferenceSession(model_path, providers=providers)  # type: ignore[union-attr]
 
 
@@ -154,17 +148,16 @@ def diagnose() -> dict:
 
     version = _ort.__version__  # type: ignore[union-attr]
     available = _ort.get_available_providers()  # type: ignore[union-attr]
+    # Filter out TensorrtExecutionProvider — excluded due to stability issues
+    available = [p for p in available if p != "TensorrtExecutionProvider"]
     has_cuda = "CUDAExecutionProvider" in available
     has_dml = "DmlExecutionProvider" in available
-    has_trt = "TensorrtExecutionProvider" in available
 
     active = None
     if has_cuda:
         active = "CUDA"
     elif has_dml:
         active = "DirectML"
-    elif has_trt:
-        active = "TensorRT"
 
     issues: list[str] = []
     hint: str | None = None
@@ -204,7 +197,6 @@ def diagnose() -> dict:
         "gpu_active": bool(active),
         "has_cuda": has_cuda,
         "has_dml": has_dml,
-        "has_tensorrt": has_trt,
         "installed_wheels": wheels,
         "issues": issues,
         "hint": hint,

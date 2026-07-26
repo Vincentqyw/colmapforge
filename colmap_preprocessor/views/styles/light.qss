@@ -97,19 +97,19 @@ QPushButton#btnRun {
 QPushButton#btnRun:hover { background-color: #2db84d; }
 QPushButton#btnRun:disabled { background-color: #e5e5ea; color: #c7c7cc; }
 
-/* ── Secondary action (Open Output Folder) — outlined style ── */
+/* ── Secondary action (Open Output Folder) — filled style ── */
 QPushButton#btnSecondary {
-    background-color: transparent;
-    color: #0a84ff;
-    border: 1px solid #d1d1d6;
+    background-color: #e5f1ff;
+    color: #0055b3;
+    border: none;
     font-weight: 500;
     font-size: 12px;
     padding: 7px 24px;
     border-radius: 10px;
 }
-QPushButton#btnSecondary:hover { background-color: #f2f2f7; border-color: #c7c7cc; }
-QPushButton#btnSecondary:pressed { background-color: #e5e5ea; }
-QPushButton#btnSecondary:disabled { color: #c7c7cc; border-color: #e5e5ea; }
+QPushButton#btnSecondary:hover { background-color: #cce3ff; }
+QPushButton#btnSecondary:pressed { background-color: #b3d4ff; }
+QPushButton#btnSecondary:disabled { background-color: #e5e5ea; color: #c7c7cc; }
 
 /* ── Checkable buttons ── */
 QPushButton[checkable="true"] {

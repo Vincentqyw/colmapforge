@@ -1,5 +1,6 @@
 # Code from:
 # https://github.com/vietanhdev/samexporter/blob/main/samexporter/sam2_onnx.py
+import logging
 import time
 from typing import Any
 
@@ -8,6 +9,8 @@ import numpy as np
 from numpy import ndarray
 
 from ..onnx_utils import create_inference_session
+
+logger = logging.getLogger(__name__)
 
 
 class SegmentAnything2ONNX:
@@ -123,7 +126,7 @@ class SAM2ImageEncoder:
             self.output_names, {self.input_names[0]: input_tensor}
         )
 
-        print(f"infer time: {(time.perf_counter() - start) * 1000:.2f} ms")
+        logger.debug("infer time: %.2f ms", (time.perf_counter() - start) * 1000)
         return outputs
 
     def process_output(
@@ -283,7 +286,7 @@ class SAM2ImageDecoder:
             {self.input_names[i]: inputs[i] for i in range(len(self.input_names))},
         )
 
-        print(f"infer time: {(time.perf_counter() - start) * 1000:.2f} ms")
+        logger.debug("infer time: %.2f ms", (time.perf_counter() - start) * 1000)
         return outputs
 
     def process_output(
