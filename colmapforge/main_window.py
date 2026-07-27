@@ -51,7 +51,7 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("COLMAP Forge")
-        self.setMinimumSize(960, 900); self.resize(1200, 1000)
+        self.setMinimumSize(960, 900)
         self.setWindowIcon(make_app_icon())
 
         # ── shared state ──
@@ -86,6 +86,12 @@ class MainWindow(QMainWindow):
         self._install_scroll_blocker()
         self._refresh_gpu_status()
         QTimer.singleShot(200, self._preview.refresh_preview)
+
+    def showEvent(self, event) -> None:
+        """Defer resize until window frame geometry is resolved (avoids height
+        jump when dragging the title bar on Windows after first show)."""
+        super().showEvent(event)
+        self.resize(1200, 1000)
 
     # ═══════════════════════════════════════════════════════════════════
     # Theme
@@ -185,16 +191,19 @@ class MainWindow(QMainWindow):
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(self._make_left_panel())
         splitter.addWidget(self._preview)
-        splitter.setSizes([420, 780])
+        splitter.setCollapsible(0, False)  # prevent left panel from disappearing when dragged
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
+        splitter.setSizes([420, 780])
         root.addWidget(splitter, 1)
 
-        self.status_bar = QStatusBar(); root.addWidget(self.status_bar)
+        self.status_bar = QStatusBar()
+        self.status_bar.setSizeGripEnabled(False)
+        self.setStatusBar(self.status_bar)
 
     def _make_left_panel(self) -> QWidget:
         scroll = QScrollArea(); scroll.setWidgetResizable(True)
-        scroll.setMinimumWidth(360); scroll.setMaximumWidth(520)
+        scroll.setMinimumWidth(340); scroll.setMaximumWidth(480)
         scroll.setObjectName("leftPanel")
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         scroll.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)

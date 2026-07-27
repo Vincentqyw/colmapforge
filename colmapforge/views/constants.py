@@ -10,13 +10,13 @@ class _S:
     SECTION_GAP = 6
     ROW_GAP = 1
     CARD_PAD = (10, 3, 10, 3)   # left top right bottom — tight
-    LABEL_W = 90                  # form label fixed width (fits "Confidence", "Max frames")
+    LABEL_W = 80                  # form label fixed width (fits "Confidence", "Max frames")
 
 
 class _W:
     """Widget width constants."""
-    COMBO = 180
-    SPIN_MIN = 80
+    COMBO = 150
+    SPIN_MIN = 70
     # No SPIN_MAX — let spinbox stretch to fill grid col 1-2, same as combo box
 
 
