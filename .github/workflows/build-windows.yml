@@ -1,4 +1,4 @@
-# Build COLMAP Forge for Windows — produces CPU, DirectML, and CUDA .zip bundles.
+# Build COLMAP Forge for Windows — produces CPU and CUDA .zip bundles.
 # Triggered by version tags (v*) or manual dispatch.
 name: Build (Windows)
 
@@ -74,72 +74,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: COLMAP-Forge-windows-x64-CPU.zip
-          generate_release_notes: true
-
-  build-windows-gpu:
-    runs-on: windows-latest
-    name: Windows (GPU — DirectML)
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v3
-
-      - name: Install dependencies (DirectML onnxruntime)
-        # DirectML works on any DirectX 12 GPU (AMD, Intel, NVIDIA).
-        # No CUDA or vendor-specific runtime required.
-        run: uv sync --extra directml --no-dev
-
-      - name: Install PyInstaller
-        run: uv pip install pyinstaller
-
-      - name: Install UPX (binary compressor)
-        uses: crazy-max/ghaction-upx@v3
-        with:
-          install-only: true
-
-      - name: Build executable
-        shell: pwsh
-        run: |
-          $excludes = Get-Content .github/pyinstaller-excludes.txt `
-            | Where-Object { $_ -notmatch '^\s*(#|$)' } `
-            | Where-Object { $_ -notmatch '^\s*$' } `
-            | ForEach-Object { $_.Trim() } `
-            | ForEach-Object { @('--exclude-module', $_) }
-          $allExcludes = $excludes | ForEach-Object { $_ }
-
-          uv run pyinstaller --noconfirm --windowed --name "COLMAP-Forge-GPU" `
-            --add-data "colmapforge/views/styles;colmapforge/views/styles" `
-            --add-data "colmapforge/configs;colmapforge/configs" `
-            --collect-submodules colmapforge `
-            --collect-all cv2 `
-            --collect-all onnxruntime `
-            --hidden-import darkdetect `
-            @allExcludes `
-            run.py
-
-      - name: Package as zip
-        shell: pwsh
-        run: |
-          Compress-Archive -Path dist/COLMAP-Forge-GPU/* `
-            -DestinationPath COLMAP-Forge-windows-x64-GPU.zip -Force
-
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: COLMAP-Forge-windows-x64-GPU
-          path: COLMAP-Forge-windows-x64-GPU.zip
-          retention-days: 30
-
-      - name: Upload to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: COLMAP-Forge-windows-x64-GPU.zip
           generate_release_notes: true
 
   build-windows-cuda:
