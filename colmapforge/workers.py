@@ -297,7 +297,7 @@ class SkyWaterWorker(QRunnable):
             if not target_ids:
                 target_ids = {1, 2, 3}  # default: mask sky+water+person
 
-            # GPU-accelerated session (CUDA → DirectML → CPU fallback).
+            # GPU-accelerated session (CUDA → CoreML → CPU fallback).
             sess = create_inference_session(self.model_path)
             providers_used = sess.get_providers()
             logger.info("SkyWater session providers: %s", providers_used)

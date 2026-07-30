@@ -1,7 +1,14 @@
 """ONNX Runtime provider selection utilities.
 
-Prefers GPU acceleration (CUDA → DirectML) and falls back to CPU.
+Provider priority (best available auto-selected):
+  CUDA (NVIDIA) → CoreML (Apple Silicon) → CPU
+
 TensorRT is excluded (stability issues with dynamic shapes).
+
+The ``onnxruntime`` CPU wheel on macOS includes ``CoreMLExecutionProvider``
+for Apple Silicon GPU / Neural Engine acceleration — no separate package
+needed.  On Linux / Windows, ``onnxruntime-gpu`` provides ``CUDAExecutionProvider``
+for NVIDIA GPUs.
 
 This module also exposes :func:`diagnose` which inspects the local
 onnxruntime installation and surfaces the *silent overwrite* failure mode
@@ -33,15 +40,12 @@ except ImportError as _e:
 
 
 _INSTALL_HINT = (
-    "ONNX Runtime is not installed. Install EXACTLY ONE of the following "
-    "(they are mutually exclusive and will silently break each other):\n"
-    "  uv pip install onnxruntime           # CPU only\n"
-    "  uv pip install onnxruntime-gpu       # NVIDIA + CUDA 13\n"
-    "  uv pip install onnxruntime-directml  # Windows, any GPU\n"
-    "Or use the project extras:\n"
-    '  uv pip install -e ".[cpu]"\n'
-    '  uv pip install -e ".[gpu]"\n'
-    '  uv pip install -e ".[directml]"'
+    "ONNX Runtime >= 1.28 is required (SAM models need it).\n"
+    "Install the right package for your platform:\n"
+    "  macOS (Apple Silicon): onnxruntime      — includes CoreML GPU/ANE\n"
+    "  Linux / Windows (NVIDIA): onnxruntime-gpu  — CUDA acceleration\n"
+    "  Linux / Windows (CPU-only): onnxruntime — CPU fallback\n"
+    "Install exactly ONE — multiple onnxruntime* wheels silently break each other."
 )
 
 # Fix recipe shown when the silent-overwrite issue is detected.
@@ -51,8 +55,8 @@ _OVERWRITE_FIX = (
     "being installed alongside the GPU wheel and overwriting its binaries. "
     "Fix:\n"
     "  uv pip uninstall onnxruntime onnxruntime-gpu\n"
-    "  Remove-Item .venv/Lib/site-packages/onnxruntime -Recurse -Force\n"
-    "  uv pip install onnxruntime-gpu --no-deps"
+    "  rm -rf .venv/lib/python*/site-packages/onnxruntime/\n"
+    "  uv pip install onnxruntime-gpu"
 )
 
 
@@ -74,7 +78,7 @@ def get_onnx_providers(
 ) -> list[str]:
     """Return a prioritized list of ONNX Runtime execution providers.
 
-    Order: CUDAExecutionProvider → DirectML → CPUExecutionProvider.
+    Priority: CUDA → CoreML → CPU.
     If ``force_cpu=True``, only CPUExecutionProvider is returned.
     """
     require_onnxruntime()
@@ -82,13 +86,13 @@ def get_onnx_providers(
         return ["CPUExecutionProvider"]
     available = _ort.get_available_providers()  # type: ignore[union-attr]
     ordered: list[str] = []
-    # 1) CUDA (highest throughput for typical ONNX models)
+    # 1) CUDA — highest throughput for NVIDIA GPUs (Linux / Windows)
     if "CUDAExecutionProvider" in available:
         ordered.append("CUDAExecutionProvider")
-    # 2) DirectML (Windows GPU fallback when CUDA is unavailable)
-    if "DmlExecutionProvider" in available:
-        ordered.append("DmlExecutionProvider")
-    # 3) CPU (always available, guaranteed fallback)
+    # 2) CoreML — Apple Silicon GPU + Neural Engine (macOS)
+    if "CoreMLExecutionProvider" in available:
+        ordered.append("CoreMLExecutionProvider")
+    # 3) CPU — always available, guaranteed fallback
     if "CPUExecutionProvider" not in ordered:
         ordered.append("CPUExecutionProvider")
     return ordered
@@ -121,8 +125,8 @@ def diagnose() -> dict:
     - ``installed``: bool — module importable?
     - ``version``: str | None
     - ``providers``: list[str] — available execution providers
-    - ``active_provider``: str | None — first GPU-ish provider, else None
-    - ``gpu_active``: bool — CUDA or DirectML present?
+    - ``active_provider``: str | None — best accelerator (CUDA / CoreML)
+    - ``gpu_active``: bool — any hardware accelerator present?
     - ``installed_wheels``: list[str] — which onnxruntime* dists are present
     - ``issues``: list[str] — human-readable problems (empty if healthy)
     - ``hint``: str | None — install/fix hint when ``issues`` is non-empty
@@ -151,13 +155,14 @@ def diagnose() -> dict:
     # Filter out TensorrtExecutionProvider — excluded due to stability issues
     available = [p for p in available if p != "TensorrtExecutionProvider"]
     has_cuda = "CUDAExecutionProvider" in available
-    has_dml = "DmlExecutionProvider" in available
+    has_coreml = "CoreMLExecutionProvider" in available
 
+    # Best accelerator: CUDA > CoreML
     active = None
     if has_cuda:
         active = "CUDA"
-    elif has_dml:
-        active = "DirectML"
+    elif has_coreml:
+        active = "CoreML"
 
     issues: list[str] = []
     hint: str | None = None
@@ -165,27 +170,20 @@ def diagnose() -> dict:
     # The silent-overwrite problem: GPU wheel metadata present but CUDA
     # provider missing from the runtime. This is exactly the failure mode
     # that bites new users after `pip install onnxruntime onnxruntime-gpu`.
+    # Note: on macOS, the CPU wheel providing CoreML is the *expected* state
+    # and is NOT an issue — CoreML is included in the standard CPU wheel.
     has_gpu_wheel = "onnxruntime-gpu" in wheels
-    has_dml_wheel = "onnxruntime-directml" in wheels
     has_cpu_wheel = "onnxruntime" in wheels
 
-    if has_gpu_wheel and not has_cuda:
+    if has_gpu_wheel and has_cpu_wheel and not has_cuda:
         issues.append(_OVERWRITE_FIX)
         hint = _OVERWRITE_FIX
-    elif has_dml_wheel and not has_dml:
-        issues.append(
-            "onnxruntime-directml is installed but DmlExecutionProvider is "
-            "missing. Reinstall it cleanly:\n"
-            "  uv pip uninstall onnxruntime onnxruntime-directml\n"
-            "  uv pip install onnxruntime-directml --no-deps"
-        )
-        hint = issues[-1]
-    elif len(wheels) > 1 and not (has_cuda or has_dml):
+    elif len(wheels) > 1 and not has_cuda:
         # Multiple onnxruntime* dists installed and no GPU provider active.
         issues.append(
             f"Multiple onnxruntime distributions installed: {wheels}. "
             "Only ONE should be present. Uninstall all and reinstall the one "
-            "you want (see _INSTALL_HINT)."
+            "you want (see install hint above)."
         )
         hint = _INSTALL_HINT
 
@@ -196,7 +194,7 @@ def diagnose() -> dict:
         "active_provider": active,
         "gpu_active": bool(active),
         "has_cuda": has_cuda,
-        "has_dml": has_dml,
+        "has_coreml": has_coreml,
         "installed_wheels": wheels,
         "issues": issues,
         "hint": hint,
@@ -221,9 +219,9 @@ def log_diagnostics() -> dict:
         diag["version"], diag["providers"],
     )
     if diag["gpu_active"]:
-        logger.info("GPU acceleration: ENABLED (%s)", diag["active_provider"])
+        logger.info("Hardware acceleration: ENABLED (%s)", diag["active_provider"])
     else:
-        logger.info("GPU acceleration: disabled (CPU only)")
+        logger.info("Hardware acceleration: disabled (CPU only)")
     return diag
 
 
@@ -272,9 +270,9 @@ def auto_fix_overwrite() -> tuple[bool, str]:
         except Exception:
             pass
     if not site_packages:
-        # Fallback: derive from venv python path
-        venv_root = os.path.dirname(os.path.dirname(venv_python))
-        candidate = os.path.join(venv_root, "Lib", "site-packages")
+        # Fallback: derive from venv python path (handles both Unix and Windows)
+        import sysconfig
+        candidate = sysconfig.get_paths().get("purelib", "")
         if os.path.isdir(candidate):
             site_packages = candidate
     if not site_packages:
@@ -325,32 +323,47 @@ def auto_fix_overwrite() -> tuple[bool, str]:
     )
 
 
-def ensure_onnxruntime_healthy(*, auto_fix: bool = True) -> bool:
+def ensure_onnxruntime_healthy(*, auto_fix: bool = True) -> tuple[bool, bool]:
     """Check ONNX Runtime health; optionally auto-repair and request restart.
 
-    Returns ``True`` if healthy (or no fix was attempted). Returns ``False``
-    when a fix was applied and the caller MUST exit the process so the user
-    can restart with the repaired environment.
+    Returns ``(should_continue, needs_restart)``:
+
+    - ``(True, False)``  — healthy, or a non-fixable issue exists but the app
+      can continue (segmentation will fail with a clear error later).
+    - ``(False, True)``  — an auto-fix was applied successfully; the caller
+      MUST exit the process so the user can restart with the repaired
+      environment.
+    - ``(False, False)`` — an unrecoverable error was detected; the caller
+      should exit (a QMessageBox was already shown).
 
     Intended to be called early at app startup, after ``QApplication`` is
     created (so ``QMessageBox`` is available for the restart prompt).
     """
     diag = diagnose()
-    if not diag["issues"]:
-        return True  # healthy
 
-    logger.warning("ONNX Runtime issue detected: %s", diag["issues"][0])
+    # Healthy — no issues at all.
+    if not diag["issues"]:
+        return True, False
+
+    issue_text = diag["issues"][0]
+    logger.warning("ONNX Runtime issue detected: %s", issue_text)
+
+    # Not installed at all — the app can continue; segmentation will fail
+    # later with a clear user-facing message.
+    if not diag["installed"]:
+        return True, False
 
     if not auto_fix:
-        return False
+        return True, False
 
-    # Only auto-fix the silent-overwrite problem (GPU wheel present but CUDA missing)
+    # Only auto-fix the silent-overwrite problem (GPU wheel present but CUDA missing).
     wheels = diag.get("installed_wheels", [])
     has_gpu_wheel = "onnxruntime-gpu" in wheels
     has_cpu_wheel = "onnxruntime" in wheels
     if not (has_gpu_wheel and has_cpu_wheel and not diag["gpu_active"]):
-        # Different problem (e.g. onnxruntime not installed at all) — can't auto-fix
-        return False
+        # Different problem (e.g. multiple dists installed) — can't auto-fix
+        # but the app can still try to continue.
+        return True, False
 
     from PyQt6.QtWidgets import QMessageBox
 
@@ -370,7 +383,7 @@ def ensure_onnxruntime_healthy(*, auto_fix: bool = True) -> bool:
     )
     if reply != QMessageBox.StandardButton.Yes:
         logger.warning("User declined auto-fix. App will continue with broken ONNX Runtime.")
-        return False
+        return True, False
 
     success, msg = auto_fix_overwrite()
     if success:
@@ -380,7 +393,7 @@ def ensure_onnxruntime_healthy(*, auto_fix: bool = True) -> bool:
             "ONNX Runtime Fixed",
             msg + "\n\nClick OK to exit. Then restart the application.",
         )
-        return False  # caller must exit
+        return False, True  # caller MUST exit so user restarts
     else:
         logger.error("Auto-fix failed: %s", msg)
         QMessageBox.critical(
@@ -388,7 +401,7 @@ def ensure_onnxruntime_healthy(*, auto_fix: bool = True) -> bool:
             "Auto-Fix Failed",
             msg + "\n\nPlease fix manually:\n"
             "  uv pip uninstall onnxruntime onnxruntime-gpu\n"
-            "  Remove-Item .venv/Lib/site-packages/onnxruntime -Recurse -Force\n"
-            "  uv pip install onnxruntime-gpu --no-deps",
+            "  rm -rf .venv/lib/python*/site-packages/onnxruntime/\n"
+            "  uv pip install onnxruntime-gpu",
         )
-        return False
+        return False, False  # unrecoverable

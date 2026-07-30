@@ -13,7 +13,7 @@ class SegmentAnythingONNX:
         self.target_size = 1024
         self.input_size = (684, 1024)
 
-        # GPU acceleration (CUDA → DirectML → CPU); TensorRT excluded for stability.
+        # GPU acceleration (CUDA → CoreML → CPU); TensorRT excluded for stability.
         self.encoder_session = create_inference_session(encoder_model_path)
         encoder_input = self.encoder_session.get_inputs()[0]
         self.encoder_input_name = encoder_input.name

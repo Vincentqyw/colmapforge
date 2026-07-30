@@ -12,14 +12,14 @@ A PyQt6 desktop wizard that prepares video and image data for [COLMAP](https://g
 git clone https://github.com/Vincentqyw/colmapforge.git
 cd colmapforge
 
-# Install with your GPU backend (pick ONE)
-uv sync --extra gpu          # NVIDIA + CUDA 13
-uv sync --extra directml     # Windows, any GPU
-uv sync --extra cpu          # CPU fallback
-
-# run COLMAP Forge GUI
-uv run colmapforge
+uv sync                       # install everything (CPU, works everywhere)
+uv run colmapforge            # launch the GUI
 ```
+
+> **macOS users** — CoreML (Apple Silicon GPU / Neural Engine) is included in the
+> default CPU wheel — no extra setup needed. **Linux / Windows users with NVIDIA
+> GPUs** — add `uv pip install onnxruntime-gpu` after `uv sync` for CUDA
+> acceleration.
 
 > **Zero-config models** — 16 SAM variants + SkyWater download from
 > HuggingFace on first use and cache to `~/.colmapforge/models/`.
@@ -40,7 +40,7 @@ uv run colmapforge
 - **SAM1 / SAM2 / SAM3** — auto-detected from ONNX graph inputs; SAM3 supports text prompts
 - **SkyWater** — SegFormer-B2 for fast sky/water/person segmentation (~48 MB)
 - **18 camera models** — SIMPLE_PINHOLE through EQUIRECTANGULAR, with prior focal length
-- **GPU auto-detect** — CUDA → DirectML → CPU fallback; toolbar indicator shows active backend
+- **GPU auto-detect** — CUDA → CoreML → CPU fallback; toolbar indicator shows active backend
 - **Dark / Light themes** — Apple HIG-inspired `QPalette` + QSS, toggle with Ctrl+T
 - **Preview panel** — real-time mask overlay with opacity control
 
@@ -111,40 +111,46 @@ is auto-detected from the ONNX graph — you don't need to pick.
 <details>
 <summary>GPU setup details — click to expand</summary>
 
-Three mutually-exclusive ONNX Runtime wheels exist — **install only one**:
+The default `uv sync` installs CPU `onnxruntime` which works everywhere.
+**macOS** users get CoreML (Apple Silicon GPU / Neural Engine) automatically
+— no extra setup needed.
 
-| Extra | Package | When |
-|-------|---------|------|
-| `[gpu]` | `onnxruntime-gpu` | NVIDIA + CUDA 13 Toolkit |
-| `[directml]` | `onnxruntime-directml` | Windows, any GPU |
-| `[cpu]` | `onnxruntime` | No GPU or unsupported |
+For **NVIDIA GPU** acceleration (Linux / Windows):
 
-> **⚠️** Installing multiple wheels silently breaks GPU acceleration —
-> their shared `site-packages/onnxruntime/` files overwrite each other.
+```bash
+uv pip install onnxruntime-gpu
+```
 
-The toolbar shows a live GPU status indicator: green = CUDA/DirectML,
-orange = CPU, red = broken. Click it for full diagnostics.
+Two wheels exist — **install only one** (they share the same module and
+silently overwrite each other's binaries):
+
+| Package | Platform | Acceleration |
+|---------|----------|-------------|
+| `onnxruntime` (default) | macOS / Linux / Windows | CoreML on macOS, CPU elsewhere |
+| `onnxruntime-gpu` | Linux / Windows (NVIDIA) | CUDA |
+
+The app auto-detects the best provider: **CUDA → CoreML → CPU**.
+A toolbar indicator shows the active backend (green = GPU, orange = CPU).
 
 **Switching backends:**
 
 ```bash
-uv sync --extra directml   # GPU → DirectML
-uv sync --extra cpu        # → CPU
-uv sync --extra gpu        # → CUDA
+uv pip install onnxruntime --force-reinstall        # → CPU / CoreML
+uv pip install onnxruntime-gpu --force-reinstall    # → CUDA
 ```
 
 **Force-clean stale files:**
 
-```powershell
-uv pip uninstall onnxruntime onnxruntime-gpu onnxruntime-directml
-Remove-Item .venv/Lib/site-packages/onnxruntime -Recurse -Force
-uv sync --extra gpu
+```bash
+uv pip uninstall onnxruntime onnxruntime-gpu
+rm -rf .venv/lib/python*/site-packages/onnxruntime/
+uv sync
 ```
 
-**NVIDIA CUDA (for `[gpu]`):**
+**NVIDIA CUDA requirements:**
 
 - Driver ≥ 580 (CUDA 13)
-- CUDA 13.x Toolkit on PATH (`cudart64_13.dll`)
+- CUDA 13.x Toolkit on PATH
 - cuDNN 9 + cuBLAS 13 bundled in `onnxruntime-gpu`
 
 </details>
@@ -162,7 +168,7 @@ uv sync --extra gpu
 - Python ≥ 3.11
 - PyQt6 ≥ 6.6
 - OpenCV ≥ 4.8
-- ONNX Runtime (see [above](#onnx-runtime-backend))
+- ONNX Runtime ≥ 1.28 (see [above](#onnx-runtime-backend))
 - `huggingface_hub` ≥ 0.24 (for SkyWater download)
 
 ## License

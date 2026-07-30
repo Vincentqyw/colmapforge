@@ -82,7 +82,7 @@ class SegmentAnything2ONNX:
 
 class SAM2ImageEncoder:
     def __init__(self, path: str) -> None:
-        # Initialize model — GPU-accelerated (CUDA → DirectML → CPU).
+        # Initialize model — GPU-accelerated (CUDA → CoreML → CPU).
         self.session = create_inference_session(path)
 
         # Get model info
@@ -155,7 +155,7 @@ class SAM2ImageDecoder:
         orig_im_size: tuple[int, int] = None,
         mask_threshold: float = 0.0,
     ) -> None:
-        # Initialize model — GPU-accelerated (CUDA → DirectML → CPU).
+        # Initialize model — GPU-accelerated (CUDA → CoreML → CPU).
         self.session = create_inference_session(path)
 
         self.orig_im_size = (

@@ -13,6 +13,12 @@ uv run ruff check .              # Lint the project
 
 User-facing install/run commands are also in README.md.
 
+> **ONNX Runtime** — `onnxruntime>=1.28` (SAM requirement) is a hard dependency.
+> The CPU wheel works everywhere; on macOS it includes CoreML. GPU users (Linux /
+> Windows, NVIDIA) add `uv pip install onnxruntime-gpu` after `uv sync`.
+> The two wheels share the same module — installing both silently breaks GPU
+> acceleration. See `onnx_utils.py` for provider selection and auto-repair logic.
+
 ## Architecture
 
 This is a **PyQt6 desktop GUI** (single-window wizard) that preprocesses video/image data for COLMAP Structure-from-Motion. It chains four async pipeline stages — frame extraction → resize → segmentation → COLMAP database export — using `QRunnable` workers on a `QThreadPool`.
@@ -31,6 +37,7 @@ This is a **PyQt6 desktop GUI** (single-window wizard) that preprocesses video/i
 | `utils.py` | Pure functions: video metadata, image file collection, resize, frame index computation |
 | `camera_models.py` | COLMAP `CameraModel` dataclasses (IDs 0–17, includes EUCM and EQUIRECTANGULAR beyond the standard 16). `default_params()` computes defaults from image dimensions |
 | `colmap_database.py` | `ColmapDatabase` context manager: creates a COLMAP-compatible SQLite DB (WAL mode, FK enabled), stores camera params as BLOBs via `struct.pack`, converts paths to relative |
+| `onnx_utils.py` | ONNX Runtime provider selection (CUDA → CoreML → CPU priority), diagnostics, and silent-overwrite auto-repair. The CPU wheel on macOS includes CoreML for Apple Silicon acceleration |
 | `theme.py` | Singleton `Theme` class: `apply_theme()` loads QSS from `views/styles/`, `_make_palette()` builds Apple HIG-inspired `QPalette` for dark/light |
 | `sam_backends/` | Three SAM ONNX inference backends (SAM1/SAM2/SAM3). SAM3 forces CPU EP to avoid GPU OOM. Each backend handles its own image preprocessing and prompt encoding |
 

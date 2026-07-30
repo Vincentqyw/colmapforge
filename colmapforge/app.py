@@ -59,10 +59,19 @@ def main(argv: list[str] | None = None) -> int:
     # in and overwrote onnxruntime-gpu's binaries, this will offer to
     # uninstall the CPU wheel + reinstall GPU, then ask the user to restart.
     # Must run AFTER QApplication is created (uses QMessageBox).
+    #
+    # Returns (should_continue, needs_restart):
+    #   - (True, False)  → healthy, or issue exists but app can continue
+    #   - (False, True)  → auto-fix applied; caller MUST exit so user restarts
     from .onnx_utils import ensure_onnxruntime_healthy
-    if not ensure_onnxruntime_healthy():
+    should_continue, needs_restart = ensure_onnxruntime_healthy()
+    if needs_restart:
         logger.warning("ONNX Runtime needs a restart after auto-fix. Exiting.")
         return 0
+    if not should_continue:
+        # Unrecoverable issue; onnx_utils already showed an error dialog.
+        logger.error("ONNX Runtime is in an unrecoverable state. Exiting.")
+        return 1
 
     from .main_window import MainWindow
     window = MainWindow()
