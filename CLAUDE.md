@@ -5,7 +5,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-uv sync                          # Install all dependencies
+uv sync --extra cpu              # Install all dependencies (CPU ONNX Runtime)
+uv sync --extra gpu              # Install all dependencies (CUDA ONNX Runtime, NVIDIA GPU)
 uv run colmapforge               # Launch the GUI
 uv run colmapforge --log-level DEBUG  # Launch with debug logging
 uv run ruff check .              # Lint the project
@@ -13,11 +14,11 @@ uv run ruff check .              # Lint the project
 
 User-facing install/run commands are also in README.md.
 
-> **ONNX Runtime** — `onnxruntime>=1.28` (SAM requirement) is a hard dependency.
-> The CPU wheel works everywhere; on macOS it includes CoreML. GPU users (Linux /
-> Windows, NVIDIA) add `uv pip install onnxruntime-gpu` after `uv sync`.
-> The two wheels share the same module — installing both silently breaks GPU
-> acceleration. See `onnx_utils.py` for provider selection and auto-repair logic.
+> **ONNX Runtime** — `onnxruntime>=1.28` (SAM requirement) is an **optional dependency**.
+> Install via `uv sync --extra cpu` (all platforms, CoreML on macOS) or
+> `uv sync --extra gpu` (Linux / Windows, NVIDIA CUDA). The two wheels share
+> the same module — installing both silently breaks GPU acceleration.
+> See `onnx_utils.py` for provider selection and auto-repair logic.
 
 ## Architecture
 

@@ -12,14 +12,13 @@ A PyQt6 desktop wizard that prepares video and image data for [COLMAP](https://g
 git clone https://github.com/Vincentqyw/colmapforge.git
 cd colmapforge
 
-uv sync                       # install everything (CPU, works everywhere)
+uv sync --extra cpu           # install with CPU ONNX Runtime (works everywhere)
 uv run colmapforge            # launch the GUI
 ```
 
 > **macOS users** — CoreML (Apple Silicon GPU / Neural Engine) is included in the
-> default CPU wheel — no extra setup needed. **Linux / Windows users with NVIDIA
-> GPUs** — add `uv pip install onnxruntime-gpu` after `uv sync` for CUDA
-> acceleration.
+> CPU wheel — no extra setup needed. **Linux / Windows users with NVIDIA
+> GPUs** — use `uv sync --extra gpu` for CUDA acceleration.
 
 > **Zero-config models** — 16 SAM variants + SkyWater download from
 > HuggingFace on first use and cache to `~/.colmapforge/models/`.
@@ -111,14 +110,20 @@ is auto-detected from the ONNX graph — you don't need to pick.
 <details>
 <summary>GPU setup details — click to expand</summary>
 
-The default `uv sync` installs CPU `onnxruntime` which works everywhere.
+ONNX Runtime is not a hard dependency — install via project extras:
+
+```bash
+uv sync --extra cpu    # CPU (all platforms, CoreML on macOS)
+uv sync --extra gpu    # CUDA (Linux / Windows, NVIDIA GPU)
+```
+
 **macOS** users get CoreML (Apple Silicon GPU / Neural Engine) automatically
-— no extra setup needed.
+from the CPU wheel — no extra setup needed.
 
 For **NVIDIA GPU** acceleration (Linux / Windows):
 
 ```bash
-uv pip install onnxruntime-gpu
+uv sync --extra gpu
 ```
 
 Two wheels exist — **install only one** (they share the same module and
@@ -135,16 +140,17 @@ A toolbar indicator shows the active backend (green = GPU, orange = CPU).
 **Switching backends:**
 
 ```bash
-uv pip install onnxruntime --force-reinstall        # → CPU / CoreML
-uv pip install onnxruntime-gpu --force-reinstall    # → CUDA
+uv sync --extra cpu    # → CPU / CoreML
+uv sync --extra gpu    # → CUDA
 ```
 
-**Force-clean stale files:**
+**Force-clean stale files (if providers are wrong):**
 
 ```bash
 uv pip uninstall onnxruntime onnxruntime-gpu
 rm -rf .venv/lib/python*/site-packages/onnxruntime/
-uv sync
+rm -rf .venv/lib/python*/site-packages/onnxruntime*.dist-info/
+uv sync --extra gpu    # or --extra cpu
 ```
 
 **NVIDIA CUDA requirements:**

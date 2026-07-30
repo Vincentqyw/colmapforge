@@ -17,14 +17,13 @@ dependencies = [
     "osam>=0.2.0",
     # Auto-download of SkyWater weights from HuggingFace Hub.
     "huggingface_hub>=0.24",
-    # CPU ONNX Runtime — the safe default on every platform.
-    # macOS: includes CoreML for Apple Silicon GPU / Neural Engine.
-    # `onnxruntime-gpu` provides the same `onnxruntime` Python package,
-    # so uv will NOT rein stall the CPU wheel over a GPU install.
+    # ONNX Runtime is NOT a hard dependency — install via extras:
+    #   uv sync --extra cpu   (all platforms, CoreML on macOS)
+    #   uv sync --extra gpu   (Linux / Windows, NVIDIA CUDA)
     #
-    # GPU users (Linux / Windows, NVIDIA only):
-    #   uv pip install onnxruntime-gpu
-    "onnxruntime>=1.28.0",
+    # Or install manually after `uv sync`:
+    #   uv pip install onnxruntime          # CPU
+    #   uv pip install onnxruntime-gpu      # GPU (--no-deps to avoid overwrite)
 ]
 
 [project.optional-dependencies]
