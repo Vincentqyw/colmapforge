@@ -172,15 +172,16 @@ class SegmentationSection(QWidget):
 
     def _on_model_changed(self) -> None:
         """When the model combo changes, update custom class hint."""
-        is_sw = self._is_skywater_model()
-        if is_sw:
+        if self._is_skywater_model():
             self.lbl_custom_hint.setText(
                 "SkyWater: custom classes not supported (fixed: sky, water, person)")
             self.edit_custom_cls.setEnabled(False)
             self.edit_custom_cls.setPlaceholderText("Not available for SkyWater")
         else:
+            # The only remaining SAM family is SAM3, whose decoder has a
+            # native language encoder.
             self.lbl_custom_hint.setText(
-                "SAM3: custom classes used as text prompts")
+                "SAM3: classes used directly as text prompts")
             self.edit_custom_cls.setEnabled(True)
             self.edit_custom_cls.setPlaceholderText("Custom prompts…")
 

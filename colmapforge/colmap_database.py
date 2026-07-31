@@ -91,6 +91,18 @@ class ColmapDatabase:
     def __exit__(self, *args) -> None:
         self.close()
 
+    def reset(self) -> None:
+        """Drop an existing database so a rebuild starts from scratch.
+
+        The schema uses ``CREATE TABLE IF NOT EXISTS``, so re-opening an old
+        file would collide on ``images.name``'s UNIQUE constraint.  Removes
+        the DB file plus its WAL/SHM sidecars.
+        """
+        self.close()
+        for sidecar in (self.db_path, self.db_path + "-wal", self.db_path + "-shm"):
+            if os.path.isfile(sidecar):
+                os.remove(sidecar)
+
     def open(self) -> None:
         if self._conn is not None:
             return
@@ -172,7 +184,11 @@ class ColmapDatabase:
             camera_params = camera_model.default_params(w, h)
 
         cam_id = self.add_camera(camera_model, w, h, camera_params, prior_focal_length)
-        img_ids = self.add_images_batch(image_paths, cam_id, base_dir=os.path.dirname(image_dir))
+        # Store names relative to *image_dir* — COLMAP resolves them against
+        # its own --image_path, which is set to image_dir. Using the parent
+        # would produce "images/<file>" names and the image_path + name
+        # concatenation would double the "images" segment.
+        img_ids = self.add_images_batch(image_paths, cam_id, base_dir=image_dir)
 
         logger.info("Database built: %d images, %s [%d], %dx%d", len(image_paths), camera_model.name, cam_id, w, h)
         return {"camera_id": cam_id, "image_ids": img_ids, "image_count": len(image_paths), "width": w, "height": h}

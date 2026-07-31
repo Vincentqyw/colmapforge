@@ -255,8 +255,7 @@ class PipelineOrchestrator(QObject):
             worker = SegmentationWorker(
                 image_paths=collect_image_files([images_dir]), mask_output_dir=masks_dir,
                 model_config=resolved, target_classes=cfg.seg_target_classes,
-                confidence_threshold=cfg.seg_confidence if not is_sw else 0.0,
-                max_inference_dim=512)
+                confidence_threshold=cfg.seg_confidence)
             self._active_worker = worker
             worker.signals.progress.connect(self._on_progress)
             worker.signals.image_done.connect(self._on_mask_ready)

@@ -123,20 +123,28 @@ class FrameExtractionWorker(QRunnable):
 # SAM Segmentation Worker
 # ═══════════════════════════════════════════════════════════════════════
 
+# Long-side bound for mask accumulation: SAM3's image encoder resizes to its
+# native 1008x1008 regardless, so this bounds decoder output + compositing
+# without any encoder-side cost. Masks are upscaled back to the frame size.
+_SAM_MAX_INFER_DIM = 1024
+
+
 class SAMWorker(QRunnable):
-    """Run SAM (1/2/3) text-prompt segmentation on a directory of images."""
+    """Run SAM3 text-prompt segmentation on a directory of images.
+
+    SAM3 is the only supported SAM family: its decoder has a native language
+    encoder, so class names are passed straight to it as text prompts.
+    """
 
     def __init__(
         self, image_paths: list[str], mask_output_dir: str,
         model_config: dict, target_classes: list[str],
         confidence_threshold: float = 0.3,
-        max_inference_dim: int = 0,
     ) -> None:
         super().__init__()
         self.image_paths = image_paths; self.mask_output_dir = mask_output_dir
         self.model_config = model_config; self.target_classes = target_classes
         self.confidence_threshold = confidence_threshold
-        self.max_inference_dim = max_inference_dim
         self.signals = SegmentationSignals(); self._running = False
 
     @pyqtSlot()
@@ -148,6 +156,22 @@ class SAMWorker(QRunnable):
         try:
             model = self._load_sam()
             total = len(self.image_paths)
+            if total == 0:
+                self.signals.finished.emit(mask_paths)
+                return
+
+            # Validate the model/prompt wiring once on the first image. A
+            # systemic failure (bad shape, wrong input names) would otherwise
+            # surface only after the whole batch silently produced blank masks.
+            try:
+                self._predict_sam(model, self.image_paths[0])
+            except Exception as e:
+                logger.exception("SAM validation failed on first image")
+                self.signals.error.emit(
+                    f"SAM failed on first image: {type(e).__name__}: {e}")
+                return
+
+            failed = 0
             for idx, img_path in enumerate(self.image_paths):
                 if not self._running: break
                 pct = int(idx / total * 100)
@@ -158,98 +182,84 @@ class SAMWorker(QRunnable):
                     mp = self._save(img_path, mask); mask_paths.append(mp)
                     self.signals.image_done.emit(img_path, mp)
                 except Exception as e:
+                    # A blank mask is a *valid* result ("nothing matched"), so a
+                    # swallowed per-image crash is indistinguishable from a
+                    # working run that found nothing. Keep going; only the
+                    # first image aborts (systemic failure, caught above).
+                    failed += 1
                     logger.warning("SAM failed for %s: %s", img_path, e)
                     img = cv2.imread(img_path)
                     if img is not None:
                         mp = self._save(img_path, np.zeros(img.shape[:2], dtype=np.uint8))
                         mask_paths.append(mp)
-            self.signals.progress.emit(100, "SAM segmentation complete!")
+
+            self.signals.progress.emit(
+                100, f"SAM segmentation complete ({failed}/{total} images failed)"
+                if failed else "SAM segmentation complete!")
             self.signals.finished.emit(mask_paths)
         except Exception as e:
             logger.exception("SAM worker failed"); self.signals.error.emit(str(e))
 
     def _load_sam(self):
-        import onnx
-        dp = self.model_config["decoder_model_path"]
-        m = onnx.load(dp)
-        inputs = {i.name for i in m.graph.input}
+        """Build the SAM3 model, refusing configs without a language encoder.
 
-        if "backbone_fpn_0" in inputs or "language_mask" in inputs:
-            from .sam_backends.sam3_onnx import SegmentAnything3ONNX
-            inst = SegmentAnything3ONNX(
-                image_encoder_path=self.model_config["encoder_model_path"],
-                decoder_model_path=dp,
-                language_encoder_path=self.model_config.get("language_encoder_path"))
-            self._variant = "sam3"
-        elif "high_res_feats_0" in inputs:
-            from .sam_backends.sam2_onnx import SegmentAnything2ONNX
-            inst = SegmentAnything2ONNX(
-                encoder_model_path=self.model_config["encoder_model_path"],
-                decoder_model_path=dp)
-            self._variant = "sam2"
-        else:
-            from .sam_backends.sam_onnx import SegmentAnythingONNX
-            inst = SegmentAnythingONNX(
-                encoder_model_path=self.model_config["encoder_model_path"],
-                decoder_model_path=dp)
-            self._variant = "sam1"
-        return inst
+        Without the language encoder the decoder runs on zero-filled language
+        tensors: it still emits masks, so prompts would look "ignored" rather
+        than failing. Refuse up front instead.
+        """
+        from .sam_backends.sam3_onnx import SegmentAnything3ONNX
+        dp = self.model_config["decoder_model_path"]
+        lang_path = self.model_config.get("language_encoder_path")
+        if not lang_path or not os.path.isfile(lang_path):
+            raise RuntimeError(
+                "SAM3 model has no language encoder — text prompts cannot "
+                "be applied.\n"
+                f"Looked for it in: {self.model_config.get('config_file') or dp}\n"
+                "Re-download the model, or pick a different one.")
+        return SegmentAnything3ONNX(
+            image_encoder_path=self.model_config["encoder_model_path"],
+            decoder_model_path=dp,
+            language_encoder_path=lang_path)
 
     def _predict_sam(self, model, img_path: str) -> np.ndarray:
         img = cv2.imread(img_path)
         if img is None: raise RuntimeError(f"Cannot read: {img_path}")
-        h, w = img.shape[:2]
+        orig_h, orig_w = img.shape[:2]
 
-        # pre-resize for speed if max_inference_dim is set
-        infer_h, infer_w = h, w
-        if self.max_inference_dim and max(h, w) > self.max_inference_dim:
-            scale = self.max_inference_dim / max(h, w)
-            infer_w, infer_h = int(w * scale), int(h * scale)
+        # The image encoder always resizes to its 1008x1008 native size, so
+        # downscaling the input here costs nothing on the encoder side but
+        # keeps the decoder output and mask accumulation bounded on large
+        # frames. Final mask is upscaled back to the original size.
+        h, w = orig_h, orig_w
+        if max(h, w) > _SAM_MAX_INFER_DIM:
+            scale = _SAM_MAX_INFER_DIM / max(h, w)
+            h, w = int(h * scale), int(w * scale)
+            img = cv2.resize(img, (w, h), interpolation=cv2.INTER_LINEAR)
 
-        if self._variant == "sam3":
-            img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            img_small = cv2.resize(img_rgb, (infer_w, infer_h)) if (infer_w != w) else img_rgb
-            combined = np.zeros((infer_h, infer_w), dtype=np.uint8)
-            for ci, cls_name in enumerate(self.target_classes):
-                if not self._running: break
-                if ci == 0:
-                    embedding = model.encode(img_small, text_prompt=cls_name)
-                else:
-                    embedding = model.update_language(embedding, cls_name)
-                masks = model.predict_masks(
-                    embedding, prompt=[],
-                    confidence_threshold=self.confidence_threshold)
-                for m in masks:
-                    if m.ndim == 3 and m.shape[0] == 1: m = m[0]
-                    combined = np.maximum(combined, (m > 0).astype(np.uint8) * 255)
-            # resize mask back to original size
-            if infer_w != w:
-                combined = cv2.resize(combined, (w, h), interpolation=cv2.INTER_NEAREST)
-            logger.debug("SAM3 %s: %d classes, mask %.1f%% non-zero",
-                        Path(img_path).name, len(self.target_classes),
-                        100 * np.count_nonzero(combined) / combined.size)
-            return combined
+        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        combined = np.zeros((h, w), dtype=np.uint8)
 
-        else:
-            # SAM1/SAM2: grid prompts
-            img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            img_small = cv2.resize(img_rgb, (infer_w, infer_h)) if (infer_w != w) else img_rgb
-            embedding = model.encode(img_small)
-            grid, combined = 3, np.zeros((infer_h, infer_w), dtype=np.uint8)
-            for gy in range(grid):
-                for gx in range(grid):
-                    if not self._running: break
-                    px = int(infer_w * (gx + 0.5) / grid); py = int(infer_h * (gy + 0.5) / grid)
-                    try:
-                        masks = model.predict_masks(embedding,
-                            prompt=[{"type": "point", "data": [px, py], "label": 1}])
-                        m2 = masks[0, 0] if masks.ndim == 4 else (masks[0] if masks.ndim == 3 else masks)
-                        combined = np.maximum(combined, (m2 > 0).astype(np.uint8) * 255)
-                    except Exception as e:
-                        logger.debug("Grid (%d,%d) failed: %s", px, py, e)
-            if infer_w != w:
-                combined = cv2.resize(combined, (w, h), interpolation=cv2.INTER_NEAREST)
-            return combined
+        for ci, cls_name in enumerate(self.target_classes):
+            if not self._running: break
+            if ci == 0:
+                embedding = model.encode(img_rgb, text_prompt=cls_name)
+            else:
+                embedding = model.update_language(embedding, cls_name)
+            masks = model.predict_masks(
+                embedding, prompt=[],
+                confidence_threshold=self.confidence_threshold)
+            for m in masks:
+                if m.ndim == 3 and m.shape[0] == 1: m = m[0]
+                combined = np.maximum(combined, (m > 0).astype(np.uint8) * 255)
+
+        if (h, w) != (orig_h, orig_w):
+            combined = cv2.resize(
+                combined, (orig_w, orig_h), interpolation=cv2.INTER_NEAREST)
+
+        logger.debug("SAM3 %s: %d classes, mask %.1f%% non-zero",
+                     Path(img_path).name, len(self.target_classes),
+                     100 * np.count_nonzero(combined) / combined.size)
+        return combined
 
     def _save(self, img_path: str, mask: np.ndarray) -> str:
         out = os.path.join(self.mask_output_dir, f"{Path(img_path).stem}_mask.png")
@@ -356,7 +366,6 @@ class SegmentationWorker(QRunnable):
         model_config: dict,
         target_classes: list[str],
         confidence_threshold: float = 0.3,
-        max_inference_dim: int = 0,
     ) -> None:
         super().__init__()
         self._image_paths = image_paths
@@ -364,7 +373,6 @@ class SegmentationWorker(QRunnable):
         self._model_config = model_config
         self._target_classes = target_classes
         self._confidence_threshold = confidence_threshold
-        self._max_inference_dim = max_inference_dim
         self.signals = SegmentationSignals()
         self._worker = None; self._running = False
 
@@ -384,6 +392,10 @@ class SegmentationWorker(QRunnable):
         # ── SkyWater: auto-download from HuggingFace if not yet cached ──
         # model_path may be None when the user picked SkyWater before the
         # first download. Resolve via the model registry + HF cache.
+        def _on_progress(msg: str, done: int, total: int) -> None:
+            pct = 0 if total <= 0 else int(100 * done / total)
+            self.signals.progress.emit(pct, msg)
+
         if is_skywater:
             logical_name = model_config.get("logical_name", "skywater_segformer_b2_fp16")
             if not model_path or not os.path.isfile(model_path):
@@ -392,10 +404,6 @@ class SegmentationWorker(QRunnable):
                     self.signals.progress.emit(
                         0, "Downloading SkyWater model from HuggingFace..."
                     )
-
-                    def _on_progress(msg: str, done: int, total: int) -> None:
-                        pct = 0 if total <= 0 else int(100 * done / total)
-                        self.signals.progress.emit(pct, msg)
 
                     model_path = download_model(logical_name, progress_callback=_on_progress)
                     # Persist back into config so re-builds skip the download check
@@ -421,9 +429,6 @@ class SegmentationWorker(QRunnable):
             if (not has_downloaded or not decoder_path or not os.path.isfile(decoder_path)) and logical_name:
                 try:
                     from .model_downloader import download_zip_model
-                    def _on_progress(msg: str, done: int, total: int) -> None:
-                        pct = 0 if total <= 0 else int(100 * done / total)
-                        self.signals.progress.emit(pct, msg)
                     self.signals.progress.emit(0, f"Downloading SAM model: {logical_name}...")
                     updated = download_zip_model(logical_name, progress_callback=_on_progress)
                     model_config.update(updated)
@@ -438,7 +443,6 @@ class SegmentationWorker(QRunnable):
                 model_config=model_config,
                 target_classes=self._target_classes,
                 confidence_threshold=self._confidence_threshold,
-                max_inference_dim=self._max_inference_dim,
             )
 
         self._worker.signals = self.signals
@@ -480,7 +484,9 @@ class DatabaseBuildWorker(QRunnable):
             self.signals.progress.emit(30, f"Found {len(paths)} images")
             model = get_camera_model(self.camera_model_id)
             self.signals.progress.emit(50, "Building database...")
-            with ColmapDatabase(self.db_path) as db:
+            db = ColmapDatabase(self.db_path)
+            db.reset()  # rebuild → fresh DB (avoids UNIQUE collisions on images.name)
+            with db:
                 r = db.build_project(self.image_dir, model, self.camera_params, self.prior_focal_length)
             self.signals.progress.emit(100, f"Ready: {r['image_count']} images, {model.name}")
             self.signals.finished.emit(self.db_path)

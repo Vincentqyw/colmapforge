@@ -46,24 +46,24 @@ class SegmentAnything3ONNX:
             "backbone_fpn_1": image_encoder_outputs[4],
             "backbone_fpn_2": image_encoder_outputs[5],
             "original_size": original_size,
-            # Pre-fill as None; overwritten when a language encoder is available.
-            "language_mask": None,
-            "language_features": None,
-            "language_embeds": None,
         }
+        return self._apply_language(embedding, text_prompt)
 
-        text_prompt = text_prompt or "visual"
+    def _apply_language(self, embedding: dict, text_prompt: str | None) -> dict:
+        """Fill *embedding*'s language inputs from *text_prompt*.
+
+        Shared by :meth:`encode` and :meth:`update_language` so the two
+        language keys stay in sync.  The image tensors are shared by
+        reference (shallow copy), so re-encoding a different class term is
+        cheap — only the three small ``language_*`` keys are replaced.
+        """
+        new_embedding = dict(embedding)  # shallow copy; image tensors shared
+        new_embedding["language_mask"] = None
+        new_embedding["language_features"] = None
+        new_embedding["language_embeds"] = None
         if self.language_encoder is not None:
-            lang_outputs = self.language_encoder(text_prompt)
-            # lang_outputs indices:
-            #   [0] text_attention_mask  – bool  [1, seq_len]
-            #   [1] text_memory          – float [seq_len, 1, 256]
-            #   [2] text_embeds          – float [seq_len, 1, 1024]
-            embedding["language_mask"] = lang_outputs[0]
-            embedding["language_features"] = lang_outputs[1]
-            embedding["language_embeds"] = lang_outputs[2]
-
-        return embedding
+            new_embedding.update(self.language_encoder.encode(text_prompt or "visual"))
+        return new_embedding
 
     def predict_masks(
         self,
@@ -108,7 +108,7 @@ class SegmentAnything3ONNX:
         box_labels_np = np.array([box_labels], dtype=np.int64)
         box_masks_np = np.array([box_masks], dtype=np.bool_)
 
-        masks, scores, _boxes = self.decoder(
+        masks, scores, _ = self.decoder(
             original_size,
             embedding["vision_pos_enc_0"],
             embedding["vision_pos_enc_1"],
@@ -132,32 +132,37 @@ class SegmentAnything3ONNX:
             else:
                 masks = np.zeros((0,) + masks.shape[1:], dtype=masks.dtype)
 
-        return masks
+        # Guarantee masks come back at the input image resolution so callers
+        # can composite them directly without a shape check.
+        return self.transform_masks(masks, original_size, None)
 
     def update_language(self, embedding: dict, text_prompt: str) -> dict:
-        """Return a shallow copy of *embedding* with language features re-encoded.
+        """Re-encode just the language features for a different class term.
 
-        The image tensors (vision_pos_enc_*, backbone_fpn_*) are shared by
-        reference from the original embedding, so this is inexpensive.
-        Use this to re-run just the language encoder for a different class
-        term without repeating the costly image encoding step.
+        See :meth:`_apply_language` — the image encoding is not repeated.
         """
-        new_embedding = dict(embedding)  # shallow copy; image tensors shared
-        new_embedding["language_mask"] = None
-        new_embedding["language_features"] = None
-        new_embedding["language_embeds"] = None
+        return self._apply_language(embedding, text_prompt)
 
-        if self.language_encoder is not None:
-            lang_outputs = self.language_encoder(text_prompt or "visual")
-            new_embedding["language_mask"] = lang_outputs[0]
-            new_embedding["language_features"] = lang_outputs[1]
-            new_embedding["language_embeds"] = lang_outputs[2]
+    def transform_masks(self, masks, original_size, transform_matrix=None):
+        """Resize masks to *original_size* if the decoder emitted them at its
+        native resolution instead (some exports do).
 
-        return new_embedding
-
-    def transform_masks(self, masks, original_size, transform_matrix):
-        """No-op: SAM3 already outputs masks in original image resolution."""
-        return masks
+        Masks are boolean ``(N, 1, H, W)``; nearest-neighbour keeps them
+        binary.  Shapes already matching *original_size* are returned as-is.
+        *transform_matrix* is accepted for interface parity with the SAM1/2
+        backends but unused.
+        """
+        if masks.shape[2:] == tuple(original_size):
+            return masks
+        resized = np.empty(
+            (masks.shape[0], masks.shape[1]) + tuple(original_size), dtype=masks.dtype)
+        for i in range(masks.shape[0]):
+            for j in range(masks.shape[1]):
+                resized[i, j] = cv2.resize(
+                    masks[i, j].astype(np.uint8), (original_size[1], original_size[0]),
+                    interpolation=cv2.INTER_NEAREST,
+                ).astype(masks.dtype)
+        return resized
 
 
 class SAM3ImageEncoder:
@@ -233,7 +238,16 @@ class SAM3LanguageEncoder:
     name  : ``"tokens"``
     shape : ``[1, 32]``
     dtype : int64
+
+    Tokenisation matches the ``osam`` reference driver for these exports
+    (``osam/_models/sam3/_models.py``): the CLIP BPE tokeniser at
+    ``context_length=32``.  Keep the two in sync — a mismatched vocabulary
+    silently produces meaningless language features rather than an error.
     """
+
+    #: Output count varies by export: some publish only
+    #: (mask, features), others add a third ``text_embeds`` tensor.
+    _OUTPUT_KEYS = ("language_mask", "language_features", "language_embeds")
 
     def __init__(self, path: str) -> None:
         # SAM3 OOMs on <8GB GPUs — keep on CPU until memory budget is configurable.
@@ -257,6 +271,16 @@ class SAM3LanguageEncoder:
             "Install 'osam' for correct tokenization."
         )
         return np.zeros((len(texts), context_length), dtype=np.int64)
+
+    def encode(self, text: str) -> dict[str, Any]:
+        """Encode *text* into the decoder's language inputs.
+
+        Returns a dict keyed by decoder input name.  Exports that omit
+        ``text_embeds`` simply yield two entries; the decoder substitutes a
+        zero tensor for anything missing, so positional indexing (which used
+        to assume three outputs) is avoided here.
+        """
+        return dict(zip(self._OUTPUT_KEYS, self(text)))
 
     def __call__(self, text: str) -> list[np.ndarray]:
         tokens = self._tokenize([text], context_length=32)
