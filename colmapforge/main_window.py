@@ -256,6 +256,7 @@ class MainWindow(QMainWindow):
         self._output_section.run_clicked.connect(self._run_pipeline)
         self._output_section.stop_clicked.connect(self._stop_pipeline)
         self._output_section.open_output_requested.connect(self._open_output)
+        self._output_section.launch_colmap_clicked.connect(self._on_launch_colmap_clicked)
 
         # Pipeline
         self._pipeline.progress.connect(self._on_pipeline_progress)
@@ -537,6 +538,15 @@ class MainWindow(QMainWindow):
 
         if self._output_section.launch_colmap:
             self._launch_colmap(db_path, images_dir)
+
+    def _on_launch_colmap_clicked(self) -> None:
+        """Launch COLMAP using the last built database + images."""
+        db_path = self._output_section._db_path
+        images_dir = self._output_section._images_dir
+        if not db_path or not os.path.isfile(db_path):
+            self.status_bar.showMessage("No database yet — build it first.")
+            return
+        self._launch_colmap(db_path, images_dir)
 
     def _launch_colmap(self, db_path: str, images_dir: str) -> None:
         """Launch COLMAP GUI pointing at the built database and images."""

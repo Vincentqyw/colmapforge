@@ -114,6 +114,7 @@ class SegmentationSection(QWidget):
         cust_layout.addWidget(self.lbl_custom_cls)
         self.lbl_custom_hint = QLabel("")
         self.lbl_custom_hint.setObjectName("hintLabel")
+        self.lbl_custom_hint.setWordWrap(True)
         cust_layout.addWidget(self.lbl_custom_hint)
         grid.addWidget(cust_col, row, 1, 1, 2)
 

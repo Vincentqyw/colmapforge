@@ -82,7 +82,7 @@ QPushButton {
 }
 QPushButton:hover { background-color: #4a4a4c; }
 QPushButton:pressed { background-color: #636366; }
-QPushButton:disabled { background-color: #2c2c2e; color: #48484a; }
+QPushButton:disabled { background-color: #3a3a3c; color: #6e6e70; }
 
 QPushButton#btnRun {
     background-color: #30d158;
@@ -93,7 +93,7 @@ QPushButton#btnRun {
     border-radius: 10px;
 }
 QPushButton#btnRun:hover { background-color: #34c759; }
-QPushButton#btnRun:disabled { background-color: #2c2c2e; color: #48484a; }
+QPushButton#btnRun:disabled { background-color: #3a3a3c; color: #6e6e70; }
 
 /* ── Stop button (replaces Build while running) ── */
 QPushButton#btnStop {
@@ -106,19 +106,19 @@ QPushButton#btnStop {
 }
 QPushButton#btnStop:hover { background-color: #ff453a; }
 
-/* ── Secondary action (Open Output Folder) — filled style ── */
+/* ── Secondary actions (Launch COLMAP | Open Output) — side by side ── */
 QPushButton#btnSecondary {
-    background-color: #0a3d62;
-    color: #5ac8fa;
-    border: none;
+    background-color: #2c2c2e;
+    color: #e8e8e8;
+    border: 1px solid #48484a;
     font-weight: 500;
     font-size: 12px;
-    padding: 7px 24px;
-    border-radius: 10px;
+    padding: 7px 10px;
+    border-radius: 8px;
 }
-QPushButton#btnSecondary:hover { background-color: #0d4f7e; }
-QPushButton#btnSecondary:pressed { background-color: #0a3d62; }
-QPushButton#btnSecondary:disabled { background-color: #2c2c2e; color: #48484a; }
+QPushButton#btnSecondary:hover { background-color: #3a3a3c; border-color: #5ac8fa; color: #ffffff; }
+QPushButton#btnSecondary:pressed { background-color: #48484a; }
+QPushButton#btnSecondary:disabled { background-color: #3a3a3c; color: #6e6e70; border-color: #48484a; }
 
 /* ── Checkable buttons (downscale) ── */
 QPushButton[checkable="true"] {

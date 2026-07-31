@@ -7,10 +7,10 @@ Browses for output directory, shows progress, and triggers the pipeline.
 from __future__ import annotations
 
 from PyQt6.QtCore import QSize, pyqtSignal
-from PyQt6.QtGui import QPainter, QColor, QPixmap, QIcon
+from PyQt6.QtGui import QPainter, QColor, QPixmap, QIcon, QBrush
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
-    QLabel, QProgressBar, QPushButton, QVBoxLayout, QWidget,
+    QHBoxLayout, QLabel, QProgressBar, QPushButton, QVBoxLayout, QWidget,
 )
 
 from .icons import _icon_check, _icon_folder
@@ -34,7 +34,25 @@ def _icon_stop(size: int = 16) -> QIcon:
     return QIcon(pm)
 
 
-from PyQt6.QtGui import QBrush
+def _icon_colmap(size: int = 14) -> QIcon:
+    """Simple grid glyph for the COLMAP launch button."""
+    app = __import__("PyQt6.QtWidgets", fromlist=["QApplication"]).QApplication.instance()
+    dpr = app.devicePixelRatio() if app else 1.0
+    if dpr < 1.0: dpr = 1.0
+    phys = max(1, int(size * dpr))
+    pm = QPixmap(phys, phys); pm.setDevicePixelRatio(dpr)
+    pm.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pm); p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(QBrush(QColor("#5ac8fa")))
+    cell = size / 4.0
+    for i in range(2):
+        for j in range(2):
+            x = int(cell * (1 + 2 * i))
+            y = int(cell * (1 + 2 * j))
+            p.drawRoundedRect(x, y, int(cell), int(cell), 1, 1)
+    p.end()
+    return QIcon(pm)
 
 
 class OutputSection(QWidget):
@@ -44,17 +62,18 @@ class OutputSection(QWidget):
     run_clicked = pyqtSignal()
     stop_clicked = pyqtSignal()
     open_output_requested = pyqtSignal()
+    launch_colmap_clicked = pyqtSignal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._is_running = False
+        self._db_path = ""; self._images_dir = ""
         self.chk_launch_colmap = _section_header("Launch COLMAP GUI after build", checkable=True)
         self.chk_launch_colmap.setChecked(False)
 
         ly = QVBoxLayout(self); ly.setContentsMargins(0, 0, 0, 0); ly.setSpacing(2)
         ly.addWidget(self.chk_launch_colmap)
         ly.addWidget(_section_header("Output"))
-
 
         card, grid = _section_card(); row = 0
 
@@ -69,11 +88,24 @@ class OutputSection(QWidget):
         self.progress = QProgressBar(); self.progress.setVisible(False)
         grid.addWidget(self.progress, row, 0, 1, 3); row += 1
 
-        # ── Build / Stop button ──
+        # ── Build / Stop (full width, primary action) ──
         self.btn_run = QPushButton("Build COLMAP Database"); self.btn_run.setObjectName("btnRun")
         self.btn_run.setIconSize(QSize(16, 16))
         self.btn_run.clicked.connect(self._on_btn_run_clicked)
         grid.addWidget(self.btn_run, row, 0, 1, 3); row += 1
+
+        # ── Secondary actions side by side (Launch COLMAP | Open Output) ──
+        actions = QWidget(); al = QHBoxLayout(actions)
+        al.setContentsMargins(0, 0, 0, 0); al.setSpacing(6)
+
+        self.btn_launch_colmap = QPushButton("Launch COLMAP GUI")
+        self.btn_launch_colmap.setObjectName("btnSecondary")
+        self.btn_launch_colmap.setIcon(_icon_colmap())
+        self.btn_launch_colmap.setIconSize(QSize(14, 14))
+        self.btn_launch_colmap.setEnabled(False)
+        self.btn_launch_colmap.setToolTip("Open the built database + images in COLMAP")
+        self.btn_launch_colmap.clicked.connect(self.launch_colmap_clicked.emit)
+        al.addWidget(self.btn_launch_colmap, 1)
 
         self.btn_open_output = QPushButton("Open Output Folder")
         self.btn_open_output.setObjectName("btnSecondary")
@@ -81,7 +113,9 @@ class OutputSection(QWidget):
         self.btn_open_output.setIconSize(QSize(14, 14))
         self.btn_open_output.setEnabled(False)
         self.btn_open_output.clicked.connect(self.open_output_requested.emit)
-        grid.addWidget(self.btn_open_output, row, 0, 1, 3); row += 1
+        al.addWidget(self.btn_open_output, 1)
+
+        grid.addWidget(actions, row, 0, 1, 3); row += 1
 
         self.lbl_result = QLabel(""); self.lbl_result.setWordWrap(True)
         self.lbl_result.setObjectName("resultLabel"); self.lbl_result.setVisible(False)
@@ -122,6 +156,7 @@ class OutputSection(QWidget):
 
     def show_result(self, db_path: str, images_dir: str) -> None:
         self._is_running = False
+        self._db_path = db_path; self._images_dir = images_dir
         self.progress.setValue(100); self.progress.setVisible(False)
         self.progress.setFormat("%p%")  # reset format
         self.btn_run.setEnabled(True)
@@ -131,7 +166,9 @@ class OutputSection(QWidget):
         # Re-polish so QSS picks up the new objectName
         self.btn_run.style().unpolish(self.btn_run)
         self.btn_run.style().polish(self.btn_run)
-        self.lbl_result.setText(f"Database ready\n{db_path}\nOpen this DB + {images_dir} in COLMAP")
+        self.btn_launch_colmap.setEnabled(True)
+        self.btn_open_output.setEnabled(True)
+        self.lbl_result.setText(f"Database ready\n{db_path}")
         self.lbl_result.setVisible(True)
 
     def set_busy(self, busy: bool) -> None:
@@ -144,6 +181,7 @@ class OutputSection(QWidget):
             self.btn_run.setIcon(_icon_stop(14))
             self.btn_run.style().unpolish(self.btn_run)
             self.btn_run.style().polish(self.btn_run)
+            self.btn_launch_colmap.setEnabled(False)
             self.lbl_result.setVisible(False)
         else:
             self._is_running = False
@@ -171,4 +209,6 @@ class OutputSection(QWidget):
         self.btn_run.setIcon(QIcon())
         self.btn_run.style().unpolish(self.btn_run)
         self.btn_run.style().polish(self.btn_run)
+        self.btn_launch_colmap.setEnabled(False)
+        self.btn_open_output.setEnabled(False)
         self.lbl_result.setVisible(False)

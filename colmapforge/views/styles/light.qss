@@ -106,19 +106,19 @@ QPushButton#btnStop {
 }
 QPushButton#btnStop:hover { background-color: #ff453a; }
 
-/* ── Secondary action (Open Output Folder) — filled style ── */
+/* ── Secondary actions (Launch COLMAP | Open Output) — side by side ── */
 QPushButton#btnSecondary {
-    background-color: #e5f1ff;
-    color: #0055b3;
-    border: none;
+    background-color: #ffffff;
+    color: #3a3a3c;
+    border: 1px solid #d1d1d6;
     font-weight: 500;
     font-size: 12px;
-    padding: 7px 24px;
-    border-radius: 10px;
+    padding: 7px 10px;
+    border-radius: 8px;
 }
-QPushButton#btnSecondary:hover { background-color: #cce3ff; }
-QPushButton#btnSecondary:pressed { background-color: #b3d4ff; }
-QPushButton#btnSecondary:disabled { background-color: #e5e5ea; color: #c7c7cc; }
+QPushButton#btnSecondary:hover { background-color: #f2f2f7; border-color: #0a84ff; color: #000000; }
+QPushButton#btnSecondary:pressed { background-color: #e5e5ea; }
+QPushButton#btnSecondary:disabled { background-color: #f2f2f7; color: #c7c7cc; border-color: #d1d1d6; }
 
 /* ── Checkable buttons ── */
 QPushButton[checkable="true"] {
