@@ -2,6 +2,21 @@
 
 All notable changes to this project are documented in this file.
 
+## 1.3.0 - 2026-08-01
+
+### Features
+- Add a "Launch COLMAP GUI" button that opens the last built database and
+  images in COLMAP at any time; enabled after a successful build.
+
+### Fixes
+- Disabled buttons now have a distinct base color instead of blending into
+  the card background in dark mode.
+- The segmentation custom-class hint wraps to multiple lines so the left
+  sidebar no longer spills under the splitter handle with a horizontal
+  scrollbar.
+- Lay out Build / Stop as a full-width primary action with Launch COLMAP
+  and Open Output side by side beneath it.
+
 ## 1.2.0 - 2026-08-01
 
 ### Features
