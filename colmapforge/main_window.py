@@ -509,6 +509,18 @@ class MainWindow(QMainWindow):
     def _on_pipeline_progress(self, pct: int, msg: str) -> None:
         self._output_section.set_progress(pct, msg)
         self.status_bar.showMessage(msg)
+        # Update toolbar image count in real-time during extraction so the
+        # user sees frames accumulating rather than a static number.
+        if self._output_dir:
+            images_dir = os.path.join(self._output_dir, "images")
+            if os.path.isdir(images_dir):
+                count = len(collect_image_files([images_dir]))
+                self._toolbar.set_image_count(count)
+                # Also refresh the preview panel count text without a full
+                # image re-render (lightweight). Works even before the first
+                # preview image appears — shows a count badge on the empty
+                # preview area.
+                self._preview.update_image_count(count)
 
     def _on_pipeline_mask_ready(self, img_path: str, mask_path: str) -> None:
         mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)

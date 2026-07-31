@@ -1,16 +1,35 @@
-# SAM model registry for COLMAP Forge.
-# Each entry points to a HuggingFace-hosted ONNX model (zip).
-# On first launch the app creates stub config.yaml files under
-#   ~/.colmapforge/models/<name>/
-# and downloads the zip on first use.
+# Model registry for COLMAP Forge.
 #
-# type: "segment_anything".  Only SAM3 is supported — it is the only SAM
-# family with a native language encoder, so class prompts are passed to it
-# directly as text (SAM1/SAM2/SAM2.1 were removed for being class-agnostic).
+# Every entry is configured the same way and downloaded lazily into
+#   ~/.colmapforge/models/<name>/
+# on first use.  Download format is inferred from `download_url`:
+#   *.zip  → downloaded + extracted (SAM3)
+#   *.onnx → downloaded as a single file (SkyWater)
+#
+# type: "segment_anything" (SAM3 — the only SAM with a native language
+# encoder, so class prompts are passed straight to it as text) or
+# "skywater" (fixed sky/water/person classes, no custom prompts).
 
-# ── Segment Anything 3 (SAM3) ────────────────────────────────────────
+# ── SkyWater (default) ────────────────────────────────────────────────
+- name: "skywater_segformer_b2_fp16"
+  display_name: "SkyWater SegFormer-B2 (FP16)"
+  type: skywater
+  download_url: "https://huggingface.co/Realcat/skywater_seg/resolve/main/skywater_segformer_b2_fp16.onnx"
+  repo_id: "Realcat/skywater_seg"
+  filename: "skywater_segformer_b2_fp16.onnx"
+  size_hint_mb: 48
+
+- name: "skywater_segformer_b2_fp32"
+  display_name: "SkyWater SegFormer-B2 (FP32)"
+  type: skywater
+  download_url: "https://huggingface.co/Realcat/skywater_seg/resolve/main/skywater_segformer_b2_fp32.onnx"
+  repo_id: "Realcat/skywater_seg"
+  filename: "skywater_segformer_b2_fp32.onnx"
+  size_hint_mb: 95
+
+# ── Segment Anything 3 (SAM3) ─────────────────────────────────────────
 - name: "sam3_vit_h_20260220"
   display_name: "Segment Anything 3 (ViT-H)"
-  download_url: "https://huggingface.co/vietanhdev/segment-anything-3-onnx-models/resolve/main/sam3_vit_h.zip"
   type: segment_anything
+  download_url: "https://huggingface.co/vietanhdev/segment-anything-3-onnx-models/resolve/main/sam3_vit_h.zip"
   size_hint_mb: 3000

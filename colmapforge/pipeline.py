@@ -82,6 +82,7 @@ class PipelineOrchestrator(QObject):
     def run(self, config: PipelineConfig) -> None:
         """Validate and start the pipeline."""
         self._config = config
+        self._preview_primed = False  # reset for fresh extraction runs
 
         if not config.output_dir:
             self.error.emit("Select an output directory first.")
@@ -235,13 +236,6 @@ class PipelineOrchestrator(QObject):
             else:
                 sw_path = model_cfg.get("model_path")
                 if not sw_path or not os.path.isfile(sw_path):
-                    from .model_downloader import is_huggingface_hub_available
-                    if not is_huggingface_hub_available():
-                        self._on_error(
-                            "SkyWater model needs to be downloaded from HuggingFace, "
-                            "but huggingface_hub is not installed.\n"
-                            "Install with:  uv pip install huggingface_hub"
-                        ); return
                     info_name = model_cfg.get("logical_name", "skywater_segformer_b2_fp16")
                     from .model_downloader import get_model_info
                     meta = get_model_info(info_name) or {}
@@ -312,10 +306,16 @@ class PipelineOrchestrator(QObject):
 
     def _on_progress(self, pct: int, msg: str) -> None:
         self.progress.emit(pct, msg)
-        if self._phase == "extraction" and pct % 10 == 0 and self._config:
-            images_dir = os.path.join(self._config.output_dir, "images")
-            if os.path.isdir(images_dir):
-                self.preview_switch.emit(images_dir)
+        if self._phase == "extraction" and self._config:
+            # Refresh the preview whenever we cross a 10 % boundary so the
+            # user sees frames accumulating. Also fire at the very first
+            # frame (pct > 0) so the preview switches away from the initial
+            # placeholder as soon as images exist.
+            if pct > 0 and (pct % 10 == 0 or not getattr(self, "_preview_primed", False)):
+                self._preview_primed = True
+                images_dir = os.path.join(self._config.output_dir, "images")
+                if os.path.isdir(images_dir):
+                    self.preview_switch.emit(images_dir)
 
     def _on_error(self, msg: str) -> None:
         self.error.emit(f"Pipeline failed ({self._phase}):\n{msg}")

@@ -85,24 +85,7 @@ def _load_sam_registry() -> list[dict]:
     return _SAM_REGISTRY
 
 
-# SkyWater models (single-file HF Hub downloads, not zip-based).
-DOWNLOADABLE_MODELS: dict[str, dict] = {
-    "skywater_segformer_b2_fp16": {
-        "repo_id": "Realcat/skywater_seg",
-        "filename": "skywater_segformer_b2_fp16.onnx",
-        "display_name": "SkyWater SegFormer-B2 (FP16, ~48 MB)",
-        "size_hint_mb": 48,
-    },
-    "skywater_segformer_b2_fp32": {
-        "repo_id": "Realcat/skywater_seg",
-        "filename": "skywater_segformer_b2_fp32.onnx",
-        "display_name": "SkyWater SegFormer-B2 (FP32, ~95 MB)",
-        "size_hint_mb": 95,
-    },
-}
-
-
-# ── Public API: HF Hub (SkyWater) ────────────────────────────────────
+# ── Registry helpers ─────────────────────────────────────────────────
 
 
 def is_huggingface_hub_available() -> bool:
@@ -116,104 +99,23 @@ def is_huggingface_hub_available() -> bool:
 
 def get_model_info(logical_name: str) -> dict | None:
     """Return the registry entry for *logical_name*, or ``None``."""
-    return DOWNLOADABLE_MODELS.get(logical_name)
+    return _resolve_entry(logical_name)
 
 
-def resolve_cached_path(logical_name: str) -> str | None:
-    """Return the local path if the model is already in the HF cache.
-
-    Returns ``None`` when:
-    - the logical name is unknown
-    - huggingface_hub is not installed
-    - the file has not been downloaded yet
-    """
-    info = DOWNLOADABLE_MODELS.get(logical_name)
-    if info is None:
-        return None
-    try:
-        from huggingface_hub import try_to_load_from_cache
-
-        path = try_to_load_from_cache(
-            repo_id=info["repo_id"],
-            filename=info["filename"],
-        )
-        if path and isinstance(path, str) and os.path.isfile(path):
-            return path
-    except Exception as e:
-        logger.debug("Cache lookup failed for %s: %s", logical_name, e)
+def _resolve_entry(logical_name: str) -> dict | None:
+    """Find a registry entry by its ``name``."""
+    for entry in _load_sam_registry():
+        if entry.get("name") == logical_name:
+            return entry
     return None
 
 
-def download_model(
-    logical_name: str,
-    *,
-    progress_callback: Callable[[str, int, int], None] | None = None,
-) -> str:
-    """Download a model from HuggingFace Hub. Returns the local path.
-
-    Parameters
-    ----------
-    logical_name:
-        Key in :data:`DOWNLOADABLE_MODELS`.
-    progress_callback:
-        Optional ``(message, downloaded_bytes, total_bytes)`` callback.
-        ``total_bytes`` is 0 when unknown.
-
-    Raises
-    ------
-    ImportError
-        If ``huggingface_hub`` is not installed.
-    RuntimeError
-        On network/HTTP errors.
-    """
-    info = DOWNLOADABLE_MODELS.get(logical_name)
-    if info is None:
-        raise ValueError(f"Unknown model: {logical_name}")
-
-    try:
-        from huggingface_hub import hf_hub_download
-    except ImportError as e:
-        raise ImportError(
-            "huggingface_hub is not installed. Install with:\n"
-            "  uv pip install huggingface_hub"
-        ) from e
-
-    repo_id = info["repo_id"]
-    filename = info["filename"]
-
-    # Fast path: already cached
-    cached = resolve_cached_path(logical_name)
-    if cached:
-        logger.info("Model %s already cached at %s", logical_name, cached)
-        if progress_callback:
-            progress_callback(f"Using cached {filename}", 0, 0)
-        return cached
-
-    logger.info("Downloading %s/%s ...", repo_id, filename)
-    if progress_callback:
-        progress_callback(
-            f"Downloading {filename} (~{info.get('size_hint_mb', '?')} MB)...",
-            0, 0,
-        )
-
-    try:
-        path = hf_hub_download(repo_id=repo_id, filename=filename)
-    except Exception as e:
-        raise RuntimeError(
-            f"Failed to download {repo_id}/{filename}: {e}\n"
-            "Check your network connection, or download manually from:\n"
-            f"  https://huggingface.co/{repo_id}/resolve/main/{filename}"
-        ) from e
-
-    if progress_callback:
-        size = os.path.getsize(path) if os.path.isfile(path) else 0
-        progress_callback(f"Downloaded {filename}", size, size)
-
-    logger.info("Model cached at: %s", path)
-    return path
+def _is_zip_entry(entry: dict) -> bool:
+    """Download format is inferred from the URL suffix."""
+    return entry.get("download_url", "").endswith(".zip")
 
 
-# ── Public API: SAM model discovery ──────────────────────────────────
+# ── Public API: model discovery ──────────────────────────────────────
 
 
 def _build_sam_config(entry: dict, model_dir: str) -> dict:
@@ -333,12 +235,31 @@ def _build_stub_config(entry: dict, model_dir: str) -> dict:
     }
 
 
-def discover_models() -> list[dict]:
-    """Discover all available models (SAM + SkyWater).
+def _skywater_config(entry: dict, model_path: str | None) -> dict:
+    """Build a SkyWater config (single-file model)."""
+    size_tag = ""
+    if not model_path:
+        size = entry.get("size_hint_mb", 0)
+        size_tag = f" [Download ~{size} MB]" if size else " [Download]"
+    return {
+        "type": "skywater",
+        "name": entry["name"],
+        "display_name": entry.get("display_name", entry["name"]) + size_tag,
+        "model_path": model_path,
+        "encoder_model_path": model_path,
+        "decoder_model_path": model_path,
+        "logical_name": entry["name"],
+        "has_downloaded": model_path is not None,
+    }
 
-    Scans the bundled model registry, checks which models already exist
+
+def discover_models() -> list[dict]:
+    """Discover all available models (SkyWater + SAM3) from the registry.
+
+    Scans the bundled models.yaml, checks which models already exist
     on disk, and returns a flat list of model config dicts ready for the
-    segmentation section UI.
+    segmentation section UI.  Order follows the registry, so the first
+    entry (SkyWater) is the default selection.
 
     For models not yet downloaded, stub config.yaml files are created so
     they persist across restarts.
@@ -347,186 +268,91 @@ def discover_models() -> list[dict]:
     _migrate_old_models()
     configs: list[dict] = []
 
-    # ── SAM models from registry ──────────────────────────────────
-    registry = _load_sam_registry()
-    for entry in registry:
+    for entry in _load_sam_registry():
         name = entry["name"]
         model_dir = os.path.join(MODELS_ROOT, name)
-        cfg_path = os.path.join(model_dir, "config.yaml")
 
-        # Check if already downloaded (has ONNX files)
-        if os.path.isdir(model_dir):
-            onnx_files = [
-                f for f in os.listdir(model_dir)
-                if f.endswith(".onnx")
-            ] if os.path.isdir(model_dir) else []
-            if onnx_files:
-                configs.append(_build_sam_config(entry, model_dir))
-                continue
-            # Has directory but no ONNX files — check config.yaml for
-            # has_downloaded flag.
-            if os.path.isfile(cfg_path):
-                try:
-                    with open(cfg_path, encoding="utf-8-sig") as f:
-                        disk_cfg = yaml.safe_load(f) or {}
-                    if disk_cfg.get("has_downloaded", False):
-                        configs.append(_build_sam_config(entry, model_dir))
-                        continue
-                except Exception:
-                    pass
-
-        # Not yet downloaded — create stub
-        configs.append(_build_stub_config(entry, model_dir))
-
-    # ── SkyWater entry ────────────────────────────────────────────
-    sw_logical = "skywater_segformer_b2_fp16"
-    sw_cached = resolve_cached_path(sw_logical)
-    sw_info = DOWNLOADABLE_MODELS.get(sw_logical, {})
-    sw_size = sw_info.get("size_hint_mb", 48)
-
-    if sw_cached:
-        configs.append({
-            "type": "skywater",
-            "name": "SkyWater SegFormer-B2",
-            "display_name": "SkyWater (Sky/Water/Person) [FAST]",
-            "model_path": sw_cached,
-            "encoder_model_path": sw_cached,
-            "decoder_model_path": sw_cached,
-            "logical_name": sw_logical,
-            "has_downloaded": True,
-        })
-    elif is_huggingface_hub_available():
-        configs.append({
-            "type": "skywater",
-            "name": "SkyWater SegFormer-B2",
-            "display_name": f"SkyWater (Sky/Water/Person) [Download ~{sw_size} MB]",
-            "model_path": None,
-            "encoder_model_path": None,
-            "decoder_model_path": None,
-            "logical_name": sw_logical,
-            "has_downloaded": False,
-        })
+        if _is_zip_entry(entry):
+            # SAM3: zip → downloaded when ONNX files exist on disk.
+            cfg_path = os.path.join(model_dir, "config.yaml")
+            if os.path.isdir(model_dir):
+                onnx_files = [f for f in os.listdir(model_dir) if f.endswith(".onnx")]
+                if onnx_files:
+                    configs.append(_build_sam_config(entry, model_dir))
+                    continue
+                if os.path.isfile(cfg_path):
+                    try:
+                        with open(cfg_path, encoding="utf-8-sig") as f:
+                            disk_cfg = yaml.safe_load(f) or {}
+                        if disk_cfg.get("has_downloaded", False):
+                            configs.append(_build_sam_config(entry, model_dir))
+                            continue
+                    except Exception:
+                        pass
+            configs.append(_build_stub_config(entry, model_dir))
+        else:
+            # SkyWater: single-file model → downloaded when the file exists.
+            local = os.path.join(model_dir, entry.get("filename", name + ".onnx"))
+            configs.append(_skywater_config(entry, local if os.path.isfile(local) else None))
 
     return configs
 
 
-# ── Public API: SAM zip download ─────────────────────────────────────
+# ── Public API: unified model download ───────────────────────────────
 
 
-def download_zip_model(
-    logical_name: str,
-    *,
-    progress_callback: Callable[[str, int, int], None] | None = None,
-) -> dict:
-    """Download a SAM model zip from HuggingFace and extract it.
+def _download_file(
+    url: str, dest_path: str,
+    display: str, size_hint: int,
+    progress_callback: Callable[[str, int, int], None] | None,
+) -> None:
+    """Download *url* to *dest_path* with a throttled progress callback."""
+    if progress_callback:
+        progress_callback(
+            f"Downloading {display} (~{size_hint} MB)...", 0, 100,
+        )
 
-    Parameters
-    ----------
-    logical_name:
-        The model ``name`` from models.yaml (e.g. ``"sam_vit_b_01ec64"``).
-    progress_callback:
-        Optional ``(message, done_pct, total_pct)`` callback where
-        *done_pct* and *total_pct* are integers 0–100.
+    last_update = [0.0]
 
-    Returns
-    -------
-    dict
-        Model config with absolute paths to the downloaded ONNX files.
-        Keys: ``type``, ``name``, ``display_name``, ``encoder_model_path``,
-        ``decoder_model_path``, ``language_encoder_path`` (optional),
-        ``logical_name``, ``has_downloaded``.
+    def _progress(count: int, block_size: int, total_size: int) -> None:
+        now = time.time()
+        if now - last_update[0] < 0.2:
+            return
+        last_update[0] = now
+        if total_size > 0 and progress_callback:
+            pct = min(100, int(count * block_size * 100 / total_size))
+            progress_callback(f"Downloading {display}... {pct}%", pct, 100)
 
-    Raises
-    ------
-    ValueError
-        If *logical_name* is not in the SAM registry.
-    RuntimeError
-        On download/extraction failures.
-    """
-    registry = _load_sam_registry()
-    entry = None
-    for e in registry:
-        if e["name"] == logical_name:
-            entry = e
-            break
-    if entry is None:
-        raise ValueError(f"Unknown SAM model: {logical_name}")
+    pathlib.Path(os.path.dirname(dest_path)).mkdir(parents=True, exist_ok=True)
+    logger.info("Downloading %s from %s", display, url)
+    try:
+        urllib.request.urlretrieve(url, dest_path, reporthook=_progress)
+    except Exception as e:
+        raise RuntimeError(
+            f"Failed to download {display}: {e}\n"
+            f"URL: {url}\n"
+            "Check your network connection."
+        ) from e
 
-    model_dir = os.path.join(MODELS_ROOT, logical_name)
-    download_url = entry.get("download_url", "")
 
-    if not download_url:
-        raise ValueError(f"No download_url for model: {logical_name}")
-
-    # Fast path: already downloaded?
-    cfg_path = os.path.join(model_dir, "config.yaml")
-    if os.path.isdir(model_dir):
-        onnx_files = [
-            f for f in os.listdir(model_dir) if f.endswith(".onnx")
-        ]
-        if onnx_files:
-            if progress_callback:
-                progress_callback(f"Using cached {logical_name}", 100, 100)
-            return _build_sam_config(entry, model_dir)
-        if os.path.isfile(cfg_path):
-            try:
-                with open(cfg_path, encoding="utf-8-sig") as f:
-                    disk_cfg = yaml.safe_load(f) or {}
-                if disk_cfg.get("has_downloaded", False):
-                    if progress_callback:
-                        progress_callback(f"Using cached {logical_name}", 100, 100)
-                    return _build_sam_config(entry, model_dir)
-            except Exception:
-                pass
-
+def _download_zip(entry: dict, model_dir: str, progress_callback) -> None:
+    """Download and extract a zip model (SAM3)."""
+    display = entry.get("display_name", entry["name"])
     size_hint = entry.get("size_hint_mb", 0)
-    display = entry.get("display_name", logical_name)
-
-    # ── Download ──────────────────────────────────────────────────
     tmp_dir = tempfile.mkdtemp(prefix="colmap_sam_")
     try:
         zip_path = os.path.join(tmp_dir, "model.zip")
-
-        # Progress reporter (throttled to ~5 FPS)
-        last_update = [0.0]
-
-        def _progress(count: int, block_size: int, total_size: int) -> None:
-            now = time.time()
-            if now - last_update[0] < 0.2:
-                return
-            last_update[0] = now
-            if total_size > 0:
-                pct = min(100, int(count * block_size * 100 / total_size))
-                if progress_callback:
-                    progress_callback(
-                        f"Downloading {display}... {pct}%",
-                        pct, 100,
-                    )
+        _download_file(entry["download_url"], zip_path, display, size_hint, progress_callback)
 
         if progress_callback:
-            progress_callback(
-                f"Downloading {display} (~{size_hint} MB)...", 0, 100,
-            )
-
-        logger.info("Downloading %s from %s", logical_name, download_url)
-        try:
-            urllib.request.urlretrieve(download_url, zip_path, reporthook=_progress)
-        except Exception as e:
-            raise RuntimeError(
-                f"Failed to download {display}: {e}\n"
-                f"URL: {download_url}\n"
-                "Check your network connection."
-            ) from e
-
-        # ── Extract ────────────────────────────────────────────────
-        if progress_callback:
-            progress_callback(f"Extracting {display}...", 100, 100)
-
+            # Reset to 0 % — zip extraction can take a while and we cannot
+            # track its internal progress, so showing 100 % would mislead
+            # the user into thinking the download is finished.
+            progress_callback(f"Extracting {display}...", 0, 100)
         extract_dir = os.path.join(tmp_dir, "extract")
         with zipfile.ZipFile(zip_path, "r") as zf:
             zf.extractall(extract_dir)
 
-        # Find the model folder (the one containing config.yaml)
         model_folder = None
         for root, _dirs, files in os.walk(extract_dir):
             if "config.yaml" in files:
@@ -538,12 +364,10 @@ def download_zip_model(
                 "The zip may be corrupt or in an unexpected format."
             )
 
-        # ── Move into place ────────────────────────────────────────
         if os.path.exists(model_dir):
             shutil.rmtree(model_dir)
         shutil.move(model_folder, model_dir)
 
-        # ── Update local config ────────────────────────────────────
         local_cfg_path = os.path.join(model_dir, "config.yaml")
         local_cfg: dict = {}
         if os.path.isfile(local_cfg_path):
@@ -553,11 +377,83 @@ def download_zip_model(
         local_cfg["config_file"] = os.path.abspath(local_cfg_path)
         with open(local_cfg_path, "w", encoding="utf-8") as f:
             yaml.dump(local_cfg, f, default_flow_style=False)
-
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
-    if progress_callback:
-        progress_callback(f"Ready: {display}", 100, 100)
 
-    return _build_sam_config(entry, model_dir)
+def _download_single(entry: dict, model_dir: str, progress_callback) -> None:
+    """Download a single-file model (SkyWater)."""
+    filename = entry.get("filename") or os.path.basename(entry["download_url"])
+    dest = os.path.join(model_dir, filename)
+    _download_file(
+        entry["download_url"], dest,
+        entry.get("display_name", entry["name"]),
+        entry.get("size_hint_mb", 0), progress_callback,
+    )
+
+
+def download_model_entry(
+    logical_name: str,
+    *,
+    progress_callback: Callable[[str, int, int], None] | None = None,
+) -> dict:
+    """Download a model from the registry, returning its config dict.
+
+    The download format (zip + extract vs single file) is inferred from the
+    entry's ``download_url`` suffix.  Already-downloaded models short-circuit.
+
+    Parameters
+    ----------
+    logical_name:
+        The model ``name`` from models.yaml.
+    progress_callback:
+        Optional ``(message, done_pct, total_pct)`` callback (0–100).
+
+    Raises
+    ------
+    ValueError
+        If *logical_name* is not in the registry.
+    RuntimeError
+        On download/extraction failures.
+    """
+    entry = _resolve_entry(logical_name)
+    if entry is None:
+        raise ValueError(f"Unknown model: {logical_name}")
+    if not entry.get("download_url"):
+        raise ValueError(f"No download_url for model: {logical_name}")
+
+    model_dir = os.path.join(MODELS_ROOT, logical_name)
+
+    if _is_zip_entry(entry):
+        cfg_path = os.path.join(model_dir, "config.yaml")
+        if os.path.isdir(model_dir):
+            onnx_files = [f for f in os.listdir(model_dir) if f.endswith(".onnx")]
+            if onnx_files:
+                if progress_callback:
+                    progress_callback(f"Using cached {logical_name}", 100, 100)
+                return _build_sam_config(entry, model_dir)
+            if os.path.isfile(cfg_path):
+                try:
+                    with open(cfg_path, encoding="utf-8-sig") as f:
+                        disk_cfg = yaml.safe_load(f) or {}
+                    if disk_cfg.get("has_downloaded", False):
+                        if progress_callback:
+                            progress_callback(f"Using cached {logical_name}", 100, 100)
+                        return _build_sam_config(entry, model_dir)
+                except Exception:
+                    pass
+        _download_zip(entry, model_dir, progress_callback)
+        if progress_callback:
+            progress_callback(f"Ready: {entry['display_name']}", 100, 100)
+        return _build_sam_config(entry, model_dir)
+    else:
+        filename = entry.get("filename") or os.path.basename(entry["download_url"])
+        local = os.path.join(model_dir, filename)
+        if os.path.isfile(local):
+            if progress_callback:
+                progress_callback(f"Using cached {logical_name}", 100, 100)
+        else:
+            _download_single(entry, model_dir, progress_callback)
+            if progress_callback:
+                progress_callback(f"Ready: {entry['display_name']}", 100, 100)
+        return _skywater_config(entry, local)

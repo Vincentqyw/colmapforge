@@ -111,6 +111,11 @@ class FrameExtractionWorker(QRunnable):
                             f"Extracting: {Path(vp).name} ({fi + 1}/{len(frames)})")
                 finally:
                     cap.release()
+            if not self._running:
+                # Stopped mid-way — do not signal finished, so the pipeline
+                # does not advance to the next stage.
+                logger.info("Frame extraction stopped by user")
+                return
             self.signals.progress.emit(100, "Frame extraction complete!")
             self.signals.finished.emit(all_paths)
         except Exception as e:
@@ -193,6 +198,11 @@ class SAMWorker(QRunnable):
                         mp = self._save(img_path, np.zeros(img.shape[:2], dtype=np.uint8))
                         mask_paths.append(mp)
 
+            if not self._running:
+                # Stopped mid-way — do not signal finished, so the pipeline
+                # does not advance to the database stage.
+                logger.info("SAM segmentation stopped by user")
+                return
             self.signals.progress.emit(
                 100, f"SAM segmentation complete ({failed}/{total} images failed)"
                 if failed else "SAM segmentation complete!")
@@ -344,6 +354,11 @@ class SkyWaterWorker(QRunnable):
                 cv2.imwrite(mp, final); mask_paths.append(mp)
                 self.signals.image_done.emit(img_path, mp)
 
+            if not self._running:
+                # Stopped mid-way — do not signal finished, so the pipeline
+                # does not advance to the database stage.
+                logger.info("SkyWater segmentation stopped by user")
+                return
             self.signals.progress.emit(100, "SkyWater segmentation complete!")
             self.signals.finished.emit(mask_paths)
         except Exception as e:
@@ -396,25 +411,38 @@ class SegmentationWorker(QRunnable):
             pct = 0 if total <= 0 else int(100 * done / total)
             self.signals.progress.emit(pct, msg)
 
+        from .model_downloader import download_model_entry
+        logical_name = model_config.get("logical_name", "")
+        need_download = False
         if is_skywater:
-            logical_name = model_config.get("logical_name", "skywater_segformer_b2_fp16")
-            if not model_path or not os.path.isfile(model_path):
-                try:
-                    from .model_downloader import download_model
-                    self.signals.progress.emit(
-                        0, "Downloading SkyWater model from HuggingFace..."
-                    )
+            # SkyWater: model_path may be None before the first download.
+            need_download = not model_path or not os.path.isfile(model_path)
+        else:
+            # SAM: download when the zip hasn't been fetched yet.
+            decoder_path = model_config.get("decoder_model_path", "")
+            need_download = (
+                not model_config.get("has_downloaded", True)
+                or not decoder_path or not os.path.isfile(decoder_path)
+            )
 
-                    model_path = download_model(logical_name, progress_callback=_on_progress)
-                    # Persist back into config so re-builds skip the download check
-                    model_config["model_path"] = model_path
-                    model_config["encoder_model_path"] = model_path
-                    model_config["decoder_model_path"] = model_path
-                except Exception as e:
-                    logger.exception("SkyWater model download failed")
-                    self.signals.error.emit(f"SkyWater download failed: {e}")
-                    return
+        if need_download and logical_name:
+            try:
+                self.signals.progress.emit(0, f"Downloading model: {logical_name}...")
+                updated = download_model_entry(logical_name, progress_callback=_on_progress)
+                model_config.update(updated)
+            except Exception as e:
+                logger.exception("Model download failed for %s", logical_name)
+                self.signals.error.emit(f"Model download failed: {e}")
+                return
 
+        if not self._running:
+            # Stopped (e.g. during the model download above) — do not start
+            # the inner worker, and do not signal finished.
+            logger.info("Segmentation stopped by user")
+            return
+
+        if is_skywater:
+            model_path = model_config.get("model_path") or model_config.get("decoder_model_path")
             self._worker = SkyWaterWorker(
                 image_paths=self._image_paths,
                 mask_output_dir=self._mask_output_dir,
@@ -422,21 +450,6 @@ class SegmentationWorker(QRunnable):
                 target_classes=self._target_classes,
             )
         else:
-            # ── SAM: auto-download zip from HuggingFace on first use ──
-            has_downloaded = model_config.get("has_downloaded", True)
-            decoder_path = model_config.get("decoder_model_path", "")
-            logical_name = model_config.get("logical_name", "")
-            if (not has_downloaded or not decoder_path or not os.path.isfile(decoder_path)) and logical_name:
-                try:
-                    from .model_downloader import download_zip_model
-                    self.signals.progress.emit(0, f"Downloading SAM model: {logical_name}...")
-                    updated = download_zip_model(logical_name, progress_callback=_on_progress)
-                    model_config.update(updated)
-                except Exception as e:
-                    logger.exception("SAM model download failed")
-                    self.signals.error.emit(f"SAM model download failed: {e}")
-                    return
-
             self._worker = SAMWorker(
                 image_paths=self._image_paths,
                 mask_output_dir=self._mask_output_dir,
@@ -488,6 +501,10 @@ class DatabaseBuildWorker(QRunnable):
             db.reset()  # rebuild → fresh DB (avoids UNIQUE collisions on images.name)
             with db:
                 r = db.build_project(self.image_dir, model, self.camera_params, self.prior_focal_length)
+            if not self._running:
+                # Stopped — the pipeline terminates; do not signal finished.
+                logger.info("Database build stopped by user")
+                return
             self.signals.progress.emit(100, f"Ready: {r['image_count']} images, {model.name}")
             self.signals.finished.emit(self.db_path)
         except Exception as e:

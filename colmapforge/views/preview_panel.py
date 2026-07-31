@@ -28,6 +28,7 @@ class PreviewPanel(QWidget):
         self._mask_cache: dict[str, np.ndarray] = {}
         self._preview_key = None
         self._preview_full: QPixmap | None = None
+        self._current_size: tuple[int, int] | None = None
 
         ly = QVBoxLayout(self); ly.setContentsMargins(8, 6, 8, 6); ly.setSpacing(3)
 
@@ -102,6 +103,7 @@ class PreviewPanel(QWidget):
             self.preview_label.setText("Cannot load image"); return
 
         h, w = img.shape[:2]
+        self._current_size = (w, h)
         img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
         mask = self._mask_cache.get(self._current_image)
@@ -116,9 +118,7 @@ class PreviewPanel(QWidget):
         self._preview_full = QPixmap.fromImage(qimg)
         self._fit_preview()
 
-        name = Path(self._current_image).name
-        idx = self._all_output_images.index(self._current_image)
-        self.lbl_preview_info.setText(f"{name}  {w}×{h}  [{idx + 1}/{len(self._all_output_images)}]")
+        self._set_info(w, h)
 
     def fit_in_view(self) -> None:
         self._fit_preview()
@@ -135,11 +135,29 @@ class PreviewPanel(QWidget):
         self._current_image = self._all_output_images[(idx + 1) % len(self._all_output_images)]
         self._preview_key = None; self.refresh_preview()
 
+    def update_image_count(self, total: int) -> None:
+        """Lightweight count-only update — no image re-render.
+
+        Called during frame extraction so the user sees the frame count
+        growing in real-time without the cost of reloading all images.
+        Keeps the same info format (with dimensions when known) as a full
+        refresh, so the label never jumps between layouts.
+        """
+        if not self._current_image:
+            if self._all_output_images:
+                self._current_image = self._all_output_images[0]
+            else:
+                self._set_info(None, None, total=total)
+                return
+        self._set_info(None, None, total=total)
+
     def clear(self) -> None:
         self._all_output_images.clear()
         self._current_image = ""
         self._preview_full = None
         self._preview_key = None
+        self._current_size = None
+        self.lbl_preview_info.setText("")
         self.preview_label.setText("Preview appears after Build (Ctrl+B)")
         self.thumb_list.clear()
 
@@ -147,6 +165,31 @@ class PreviewPanel(QWidget):
         super().resizeEvent(event); self._fit_preview()
 
     # ── internals ──
+
+    def _set_info(self, w: int | None, h: int | None, total: int | None = None) -> None:
+        """Update the info label under the preview in one consistent format.
+
+        ``name [idx/N]`` is always shown; ``WxH`` is appended whenever the
+        current image's dimensions are known, so the label never changes
+        shape between a lightweight count update and a full re-render.
+        """
+        if not self._current_image or not self._all_output_images:
+            self.lbl_preview_info.setText("")
+            return
+
+        name = Path(self._current_image).name
+        idx = 0
+        try:
+            idx = self._all_output_images.index(self._current_image)
+        except ValueError:
+            pass
+
+        size = self._current_size if (w is None or h is None) else (w, h)
+        n = total or len(self._all_output_images)
+        if size:
+            self.lbl_preview_info.setText(f"{name}  {size[0]}×{size[1]}  [{idx + 1}/{n}]")
+        else:
+            self.lbl_preview_info.setText(f"{name}  [{idx + 1}/{n}]")
 
     def _on_thumb_selected(self, row: int) -> None:
         if 0 <= row < len(self._all_output_images):

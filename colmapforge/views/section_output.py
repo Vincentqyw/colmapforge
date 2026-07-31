@@ -49,6 +49,7 @@ class OutputSection(QWidget):
         super().__init__(parent)
         self._is_running = False
         self.chk_launch_colmap = _section_header("Launch COLMAP GUI after build", checkable=True)
+        self.chk_launch_colmap.setChecked(False)
 
         ly = QVBoxLayout(self); ly.setContentsMargins(0, 0, 0, 0); ly.setSpacing(2)
         ly.addWidget(self.chk_launch_colmap)
@@ -111,10 +112,18 @@ class OutputSection(QWidget):
 
     def set_progress(self, pct: int, msg: str = "") -> None:
         self.progress.setValue(pct)
+        if msg:
+            # Show the status message directly on the progress bar so users
+            # always know what the app is doing — especially during long
+            # model downloads where a bare percentage looks like a freeze.
+            self.progress.setFormat(f"%p%  —  {msg}")
+        else:
+            self.progress.setFormat("%p%")
 
     def show_result(self, db_path: str, images_dir: str) -> None:
         self._is_running = False
         self.progress.setValue(100); self.progress.setVisible(False)
+        self.progress.setFormat("%p%")  # reset format
         self.btn_run.setEnabled(True)
         self.btn_run.setText("Build COLMAP Database")
         self.btn_run.setObjectName("btnRun")
@@ -155,6 +164,7 @@ class OutputSection(QWidget):
     def reset(self) -> None:
         self._is_running = False
         self.progress.setVisible(False)
+        self.progress.setFormat("%p%")  # reset format
         self.btn_run.setEnabled(True)
         self.btn_run.setText("Build COLMAP Database")
         self.btn_run.setObjectName("btnRun")
