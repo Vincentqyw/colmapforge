@@ -8,7 +8,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 uv sync --extra cpu              # Install all dependencies (CPU ONNX Runtime)
 uv sync --extra gpu              # Install all dependencies (CUDA ONNX Runtime, NVIDIA GPU)
 uv run colmapforge               # Launch the GUI
-uv run colmapforge --log-level DEBUG  # Launch with debug logging
+uv run colmapforge run -o out/ --video vid.mp4  # Run CLI pipeline (headless)
+uv run colmapforge run --help    # Show CLI options
+uv run colmapforge run --list-models  # List available segmentation models
+uv run colmapforge run --list-cameras # List available camera models
+uv run colmapforge --log-level DEBUG  # Launch GUI with debug logging
 uv run ruff check .              # Lint the project
 ```
 
@@ -22,19 +26,24 @@ User-facing install/run commands are also in README.md.
 
 ## Architecture
 
-This is a **PyQt6 desktop GUI** (single-window wizard) that preprocesses video/image data for COLMAP Structure-from-Motion. It chains four async pipeline stages — frame extraction → resize → segmentation → COLMAP database export — using `QRunnable` workers on a `QThreadPool`.
+This is a **PyQt6 desktop GUI** (single-window wizard) and **CLI tool** that preprocesses video/image data for COLMAP Structure-from-Motion. It chains four async pipeline stages — frame extraction → resize → segmentation → COLMAP database export — using `QRunnable` workers on a `QThreadPool` (GUI) or a synchronous `CLIPipeline` (CLI).
 
 ### Data flow
 
-`MainWindow` (`main_window.py`) orchestrates everything. It builds the UI (left settings panel with 6 collapsible sections, right preview panel with mask overlay), then wires each section's state into a pipeline. `MainWindow._build()` chains workers sequentially via Qt signals: each worker's `finished` signal connects to the next stage's `start()`.
+**GUI path**: `MainWindow` (`main_window.py`) orchestrates everything. It builds the UI (left settings panel with 6 collapsible sections, right preview panel with mask overlay), then wires each section's state into a pipeline. Workers chain sequentially via Qt signals: each worker's `finished` signal connects to the next stage's `start()`.
+
+**CLI path**: `app.py` dispatches `colmapforge run ...` to `cli.py`. `CLIPipeline` runs the same stages synchronously (no Qt), using the pure functions in `pipeline_core.py`. Progress is reported via `tqdm`.
 
 ### Key modules
 
 | Module | Role |
 |--------|------|
-| `app.py` | Entry point: argparse for `--log-level`, QApplication + Fusion style, hands off to `MainWindow` |
+| `app.py` | Entry point: dispatches `colmapforge` → GUI or `colmapforge run` → CLI. Lazy Qt imports keep the CLI path lightweight. |
+| `cli.py` | CLI pipeline: argparse-based argument parsing, `CLIPipeline` synchronous runner, model/camera listing. No Qt dependency. |
+| `pipeline_core.py` | Pure Python pipeline functions (no Qt): `extract_frames()`, `run_sam_segmentation()`, `run_skywater_segmentation()`, `run_segmentation()`, `build_database()`, `apply_resize()`, `copy_input_images()`. Accept progress/image-done callbacks + cancel checks. Both GUI workers and CLI call these. |
 | `main_window.py` | All UI + pipeline wiring. 6 collapsible card sections in a `QGridLayout` (not `QFormLayout`), preview panel, keyboard shortcuts |
-| `workers.py` | `QRunnable` workers with `QObject` signal containers for thread-safe GUI updates. All support cancellation via `_running` flag |
+| `workers.py` | `QRunnable` workers with `QObject` signal containers for thread-safe GUI updates. Delegates to `pipeline_core` functions, wrapping signal emissions around callbacks. All support cancellation via `_running` flag |
+| `pipeline.py` | `PipelineConfig` dataclass + `PipelineOrchestrator` QObject that chains workers via Qt signals for the GUI path |
 | `utils.py` | Pure functions: video metadata, image file collection, resize, frame index computation |
 | `camera_models.py` | COLMAP `CameraModel` dataclasses (IDs 0–17, includes EUCM and EQUIRECTANGULAR beyond the standard 16). `default_params()` computes defaults from image dimensions |
 | `colmap_database.py` | `ColmapDatabase` context manager: creates a COLMAP-compatible SQLite DB (WAL mode, FK enabled), stores camera params as BLOBs via `struct.pack`, converts paths to relative |

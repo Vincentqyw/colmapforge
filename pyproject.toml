@@ -17,6 +17,7 @@ dependencies = [
     "osam>=0.2.0",
     # Auto-download of SkyWater weights from HuggingFace Hub.
     "huggingface_hub>=0.24",
+    "tqdm>=4.66",
     # ONNX Runtime is NOT a hard dependency — install via extras:
     #   uv sync --extra cpu   (all platforms, CoreML on macOS)
     #   uv sync --extra gpu   (Linux / Windows, NVIDIA CUDA)
@@ -34,6 +35,7 @@ gpu = ["onnxruntime-gpu>=1.28.0"]
 
 [project.scripts]
 colmapforge = "colmapforge.app:main"
+cmf = "colmapforge.app:main"
 
 [build-system]
 requires = ["hatchling"]

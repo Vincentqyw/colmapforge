@@ -4,7 +4,7 @@
   <img src="assets/colmapforge-gui.jpg" alt="COLMAP Forge GUI" width="1000">
 </p>
 
-A PyQt6 desktop wizard that prepares video and image data for [COLMAP](https://github.com/colmap/colmap) Structure-from-Motion frame extraction, resizing, SAM-based dynamic object masking, and `database.db` export.
+A PyQt6 desktop wizard and CLI tool that prepares video and image data for [COLMAP](https://github.com/colmap/colmap) Structure-from-Motion — frame extraction, resizing, SAM-based dynamic object masking, and `database.db` export.
 
 ## Quick Start
 
@@ -14,6 +14,32 @@ cd colmapforge
 
 uv sync --extra cpu           # install with CPU ONNX Runtime (works everywhere)
 uv run colmapforge            # launch the GUI
+```
+
+### CLI Mode
+
+Run the preprocessing pipeline headlessly (no GUI required):
+
+```bash
+# Image-only, no segmentation
+uv run colmapforge run -o out/ --image-dir photos/
+
+# Full pipeline: video → max-dim resize → SkyWater segmentation → database
+uv run colmapforge run -o out/ --video vid.mp4 --resize \
+  --resize-mode max_dim --resize-max-dim 2000 \
+  --seg-model skywater_segformer_b2_fp16 --seg-classes sky water
+
+# SAM3 text-prompt segmentation
+uv run colmapforge run -o out/ --video vid.mp4 \
+  --seg-model sam3_vit_h_20260220 --seg-classes person car \
+  --seg-confidence 0.4
+
+# List available models and camera models
+uv run colmapforge run --list-models
+uv run colmapforge run --list-cameras
+
+# Progress bars are shown automatically via tqdm
+uv run colmapforge run -o out/ --video vid.mp4 --seg-model ...
 ```
 
 > **macOS users** — CoreML (Apple Silicon GPU / Neural Engine) is included in the
@@ -35,6 +61,7 @@ uv run colmapforge            # launch the GUI
 ## Features
 
 - **4-stage pipeline** — extraction → resize → masking → database, chained async via `QThreadPool`
+- **GUI + CLI** — full-featured desktop GUI or headless CLI for scripts/automation
 - **Zero-config models** — 16 SAM/SAM2/SAM3 + SkyWater auto-download on first run
 - **SAM1 / SAM2 / SAM3** — auto-detected from ONNX graph inputs; SAM3 supports text prompts
 - **SkyWater** — SegFormer-B2 for fast sky/water/person segmentation (~48 MB)
@@ -176,6 +203,7 @@ uv sync --extra gpu    # or --extra cpu
 - OpenCV ≥ 4.8
 - ONNX Runtime ≥ 1.28 (see [above](#onnx-runtime-backend))
 - `huggingface_hub` ≥ 0.24 (for SkyWater download)
+- `tqdm` ≥ 4.66 (CLI progress bars)
 
 ## License
 

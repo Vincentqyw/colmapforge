@@ -1,0 +1,525 @@
+"""
+Pure-python pipeline functions — no Qt dependency.
+
+Each function accepts a ``progress_cb(pct: int, message: str)`` callback
+and an optional ``cancel_event(→ bool)`` for cooperative cancellation.
+These are the computational core; the Qt workers in ``workers.py`` wrap
+them with signal emissions, and the CLI runner in ``cli.py`` calls them
+directly.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+import shutil
+from pathlib import Path
+from typing import Callable
+
+import cv2
+import numpy as np
+
+from .camera_models import get_camera_model
+from .colmap_database import ColmapDatabase
+from .utils import (
+    analyze_video,
+    collect_image_files,
+    compute_frame_indices,
+    resize_image,
+)
+
+logger = logging.getLogger(__name__)
+
+# ── Type aliases ───────────────────────────────────────────────────────
+
+ProgressCB = Callable[[int, str], None] | None
+ImageDoneCB = Callable[[str, str], None] | None
+CancelCheck = Callable[[], bool] | None
+
+# Long-side bound for SAM mask accumulation (same as workers.py).
+_SAM_MAX_INFER_DIM = 1024
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Frame Extraction
+# ═══════════════════════════════════════════════════════════════════════
+
+def extract_frames(
+    video_paths: list[str],
+    output_dir: str,
+    *,
+    method: str = "interval",
+    interval: int = 60,
+    target_fps: float = 2.0,
+    start_seconds: float = 0.0,
+    end_seconds: float | None = None,
+    max_frames: int | None = None,
+    resize_mode: str = "",
+    resize_max_dim: int = 0,
+    resize_factor: int = 1,
+    output_format: str = ".jpg",
+    jpg_quality: int = 95,
+    progress_cb: ProgressCB = None,
+    cancel_check: CancelCheck = None,
+) -> list[str]:
+    """Extract frames from *video_paths* into *output_dir*.
+
+    Returns the list of output image paths.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    all_paths: list[str] = []
+    total = len(video_paths)
+
+    for vi, vp in enumerate(video_paths):
+        if cancel_check and cancel_check():
+            logger.info("Frame extraction cancelled")
+            return all_paths
+
+        if progress_cb:
+            progress_cb(int(vi / total * 100), f"Analyzing: {Path(vp).name}")
+
+        info = analyze_video(vp)
+        frames = compute_frame_indices(
+            info["total_frames"], info["fps"],
+            method=method, interval=interval, target_fps=target_fps,
+            start_seconds=start_seconds, end_seconds=end_seconds,
+            max_frames=max_frames,
+        )
+
+        cap = cv2.VideoCapture(vp)
+        try:
+            for fi, fn in enumerate(frames):
+                if cancel_check and cancel_check():
+                    return all_paths
+
+                cap.set(cv2.CAP_PROP_POS_FRAMES, fn)
+                ret, frame = cap.read()
+                if not ret:
+                    continue
+
+                # Inline resize
+                if resize_mode == "max_dim" and resize_max_dim:
+                    frame = resize_image(frame, max_dim=resize_max_dim)
+                elif resize_mode == "downscale" and resize_factor > 1:
+                    h, w = frame.shape[:2]
+                    frame = resize_image(
+                        frame, width=w // resize_factor,
+                        height=h // resize_factor, keep_aspect=False,
+                    )
+
+                name = f"{Path(vp).stem}_f{fn:06d}{output_format}"
+                out = os.path.join(output_dir, name)
+                params: list[int] = []
+                if output_format.lower() in (".jpg", ".jpeg"):
+                    params = [cv2.IMWRITE_JPEG_QUALITY, jpg_quality]
+                elif output_format.lower() == ".png":
+                    params = [cv2.IMWRITE_PNG_COMPRESSION, 3]
+                cv2.imwrite(out, frame, params)
+                all_paths.append(out)
+
+                if progress_cb:
+                    pct = int((vi + fi / len(frames)) / total * 100)
+                    progress_cb(pct,
+                        f"Extracting: {Path(vp).name} ({fi + 1}/{len(frames)})")
+        finally:
+            cap.release()
+
+    if progress_cb:
+        progress_cb(100, "Frame extraction complete!")
+    return all_paths
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Segmentation — SAM3
+# ═══════════════════════════════════════════════════════════════════════
+
+def _load_sam3_model(model_config: dict):
+    """Build a SAM3 model from *model_config*, raising early if the language
+    encoder is missing (text prompts would silently produce junk otherwise)."""
+    from .sam_backends.sam3_onnx import SegmentAnything3ONNX
+
+    dp = model_config["decoder_model_path"]
+    lang_path = model_config.get("language_encoder_path")
+    if not lang_path or not os.path.isfile(lang_path):
+        raise RuntimeError(
+            "SAM3 model has no language encoder — text prompts cannot "
+            "be applied.\n"
+            f"Looked for it in: {model_config.get('config_file') or dp}\n"
+            "Re-download the model, or pick a different one.")
+    return SegmentAnything3ONNX(
+        image_encoder_path=model_config["encoder_model_path"],
+        decoder_model_path=dp,
+        language_encoder_path=lang_path,
+    )
+
+
+def _predict_sam3_mask(
+    model, img_path: str, target_classes: list[str],
+    confidence_threshold: float, cancel_check: CancelCheck,
+) -> np.ndarray:
+    """Run SAM3 on a single image and return a combined uint8 mask."""
+    img = cv2.imread(img_path)
+    if img is None:
+        raise RuntimeError(f"Cannot read: {img_path}")
+    orig_h, orig_w = img.shape[:2]
+
+    h, w = orig_h, orig_w
+    if max(h, w) > _SAM_MAX_INFER_DIM:
+        scale = _SAM_MAX_INFER_DIM / max(h, w)
+        h, w = int(h * scale), int(w * scale)
+        img = cv2.resize(img, (w, h), interpolation=cv2.INTER_LINEAR)
+
+    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    combined = np.zeros((h, w), dtype=np.uint8)
+
+    for ci, cls_name in enumerate(target_classes):
+        if cancel_check and cancel_check():
+            break
+        if ci == 0:
+            embedding = model.encode(img_rgb, text_prompt=cls_name)
+        else:
+            embedding = model.update_language(embedding, cls_name)
+        masks = model.predict_masks(
+            embedding, prompt=[],
+            confidence_threshold=confidence_threshold)
+        for m in masks:
+            if m.ndim == 3 and m.shape[0] == 1:
+                m = m[0]
+            combined = np.maximum(combined, (m > 0).astype(np.uint8) * 255)
+
+    if (h, w) != (orig_h, orig_w):
+        combined = cv2.resize(
+            combined, (orig_w, orig_h), interpolation=cv2.INTER_NEAREST)
+
+    logger.debug("SAM3 %s: %d classes, mask %.1f%% non-zero",
+                 Path(img_path).name, len(target_classes),
+                 100 * np.count_nonzero(combined) / combined.size)
+    return combined
+
+
+def run_sam_segmentation(
+    image_paths: list[str],
+    mask_output_dir: str,
+    model_config: dict,
+    target_classes: list[str],
+    confidence_threshold: float = 0.3,
+    *,
+    progress_cb: ProgressCB = None,
+    image_done_cb: ImageDoneCB = None,
+    cancel_check: CancelCheck = None,
+) -> list[str]:
+    """Run SAM3 segmentation on *image_paths*, writing masks to *mask_output_dir*.
+
+    Returns the list of mask image paths.
+    """
+    os.makedirs(mask_output_dir, exist_ok=True)
+    mask_paths: list[str] = []
+    total = len(image_paths)
+
+    if total == 0:
+        return mask_paths
+
+    model = _load_sam3_model(model_config)
+
+    # Validate on first image (systemic failure check)
+    try:
+        _predict_sam3_mask(model, image_paths[0], target_classes,
+                           confidence_threshold, cancel_check)
+    except Exception as e:
+        logger.exception("SAM3 validation failed on first image")
+        raise RuntimeError(
+            f"SAM3 failed on first image: {type(e).__name__}: {e}") from e
+
+    failed = 0
+    for idx, img_path in enumerate(image_paths):
+        if cancel_check and cancel_check():
+            logger.info("SAM3 segmentation cancelled")
+            return mask_paths
+
+        pct = int(idx / total * 100)
+        name = Path(img_path).name
+        if progress_cb:
+            progress_cb(pct, f"SAM: {name} ({idx + 1}/{total})")
+
+        try:
+            mask = _predict_sam3_mask(
+                model, img_path, target_classes, confidence_threshold, cancel_check)
+            mp = os.path.join(mask_output_dir, f"{Path(img_path).stem}_mask.png")
+            cv2.imwrite(mp, mask)
+            mask_paths.append(mp)
+            if image_done_cb:
+                image_done_cb(img_path, mp)
+        except Exception as e:
+            failed += 1
+            logger.warning("SAM3 failed for %s: %s", img_path, e)
+            img = cv2.imread(img_path)
+            if img is not None:
+                mp = os.path.join(mask_output_dir, f"{Path(img_path).stem}_mask.png")
+                cv2.imwrite(mp, np.zeros(img.shape[:2], dtype=np.uint8))
+                mask_paths.append(mp)
+                if image_done_cb:
+                    image_done_cb(img_path, mp)
+
+    if progress_cb:
+        progress_cb(100,
+            f"SAM segmentation complete ({failed}/{total} images failed)"
+            if failed else "SAM segmentation complete!")
+    return mask_paths
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Segmentation — SkyWater  (SegFormer-B2)
+# ═══════════════════════════════════════════════════════════════════════
+
+SW_INPUT_SIZE = (384, 384)
+SW_CLASSES = ["Background", "Sky", "Water", "Person"]
+SW_CLASS_IDS = {name.lower(): i for i, name in enumerate(SW_CLASSES)}
+_IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+_IMAGENET_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+
+
+def run_skywater_segmentation(
+    image_paths: list[str],
+    mask_output_dir: str,
+    model_path: str,
+    target_classes: list[str],
+    *,
+    progress_cb: ProgressCB = None,
+    image_done_cb: ImageDoneCB = None,
+    cancel_check: CancelCheck = None,
+) -> list[str]:
+    """Run SkyWater SegFormer-B2 segmentation on *image_paths*.
+
+    Writes masks to *mask_output_dir* and returns the list of mask paths.
+    """
+    from .onnx_utils import create_inference_session
+
+    os.makedirs(mask_output_dir, exist_ok=True)
+    mask_paths: list[str] = []
+    total = len(image_paths)
+
+    if total == 0:
+        return mask_paths
+
+    # Resolve class IDs
+    target_ids: set[int] = set()
+    for cls_name in target_classes:
+        cid = SW_CLASS_IDS.get(cls_name.lower())
+        if cid is not None:
+            target_ids.add(cid)
+    if not target_ids:
+        target_ids = {1, 2, 3}  # default: mask sky+water+person
+
+    sess = create_inference_session(model_path)
+    providers_used = sess.get_providers()
+    logger.info("SkyWater session providers: %s", providers_used)
+    in_name = sess.get_inputs()[0].name
+    out_name = sess.get_outputs()[0].name
+
+    for idx, img_path in enumerate(image_paths):
+        if cancel_check and cancel_check():
+            logger.info("SkyWater segmentation cancelled")
+            return mask_paths
+
+        pct = int(idx / total * 100)
+        name = Path(img_path).name
+        if progress_cb:
+            progress_cb(pct, f"SkyWater: {name} ({idx + 1}/{total})")
+
+        img = cv2.imread(img_path)
+        if img is None:
+            continue
+        h, w = img.shape[:2]
+        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+        # Preprocess
+        inp = cv2.resize(img_rgb, SW_INPUT_SIZE).astype(np.float32) / 255.0
+        inp = (inp - _IMAGENET_MEAN) / _IMAGENET_STD
+        inp = inp.transpose(2, 0, 1)[np.newaxis, ...]
+
+        # Inference
+        logits = sess.run([out_name], {in_name: inp})[0]  # (1,4,384,384)
+        mask_small = np.argmax(logits[0], axis=0).astype(np.uint8)  # (384,384)
+
+        # Resize back + filter to target classes
+        mask_full = cv2.resize(mask_small, (w, h), interpolation=cv2.INTER_NEAREST)
+        final = np.zeros((h, w), dtype=np.uint8)
+        for cid in target_ids:
+            final[mask_full == cid] = 255
+
+        mp = os.path.join(mask_output_dir, f"{Path(img_path).stem}_mask.png")
+        cv2.imwrite(mp, final)
+        mask_paths.append(mp)
+        if image_done_cb:
+            image_done_cb(img_path, mp)
+
+    if progress_cb:
+        progress_cb(100, "SkyWater segmentation complete!")
+    return mask_paths
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Unified segmentation dispatcher
+# ═══════════════════════════════════════════════════════════════════════
+
+def run_segmentation(
+    image_paths: list[str],
+    mask_output_dir: str,
+    model_config: dict,
+    target_classes: list[str],
+    confidence_threshold: float = 0.3,
+    *,
+    progress_cb: ProgressCB = None,
+    image_done_cb: ImageDoneCB = None,
+    cancel_check: CancelCheck = None,
+) -> list[str]:
+    """Dispatch to SAM3 or SkyWater based on *model_config*."""
+    model_path = model_config.get("model_path", "")
+
+    is_skywater = (
+        "skywater" in model_config.get("type", "").lower()
+        or "skywater" in model_config.get("name", "").lower()
+        or "skywater" in model_path.lower()
+    )
+
+    # Auto-download if needed
+    from .model_downloader import download_model_entry
+    logical_name = model_config.get("logical_name", "")
+    need_download = False
+    if is_skywater:
+        need_download = not model_path or not os.path.isfile(model_path)
+    else:
+        decoder_path = model_config.get("decoder_model_path", "")
+        need_download = (
+            not model_config.get("has_downloaded", True)
+            or not decoder_path or not os.path.isfile(decoder_path)
+        )
+
+    if need_download and logical_name:
+        if progress_cb:
+            progress_cb(0, f"Downloading model: {logical_name}...")
+
+        def _dl_progress(msg: str, done: int, total: int) -> None:
+            pct = 0 if total <= 0 else int(100 * done / total)
+            if progress_cb:
+                progress_cb(pct, msg)
+
+        updated = download_model_entry(logical_name, progress_callback=_dl_progress)
+        model_config.update(updated)
+
+    if is_skywater:
+        mp = model_config.get("model_path") or model_config.get("decoder_model_path")
+        return run_skywater_segmentation(
+            image_paths, mask_output_dir, mp, target_classes,
+            progress_cb=progress_cb, image_done_cb=image_done_cb,
+            cancel_check=cancel_check,
+        )
+    else:
+        return run_sam_segmentation(
+            image_paths, mask_output_dir, model_config,
+            target_classes, confidence_threshold,
+            progress_cb=progress_cb, image_done_cb=image_done_cb,
+            cancel_check=cancel_check,
+        )
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Database Build
+# ═══════════════════════════════════════════════════════════════════════
+
+def build_database(
+    image_dir: str,
+    db_path: str,
+    camera_model_id: int = 2,
+    camera_params: list[float] | None = None,
+    prior_focal_length: int = 0,
+    *,
+    progress_cb: ProgressCB = None,
+) -> str:
+    """Build a COLMAP-compatible SQLite database from images in *image_dir*.
+
+    Returns the path to the created database.
+    """
+    if progress_cb:
+        progress_cb(10, "Collecting images...")
+
+    paths = collect_image_files([image_dir], recursive=False)
+    if not paths:
+        raise FileNotFoundError(f"No images in {image_dir}")
+
+    if progress_cb:
+        progress_cb(30, f"Found {len(paths)} images")
+
+    model = get_camera_model(camera_model_id)
+
+    if progress_cb:
+        progress_cb(50, "Building database...")
+
+    db = ColmapDatabase(db_path)
+    db.reset()
+    with db:
+        result = db.build_project(image_dir, model, camera_params, prior_focal_length)
+
+    if progress_cb:
+        progress_cb(100, f"Ready: {result['image_count']} images, {model.name}")
+
+    return db_path
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Resize (applied to existing images on disk)
+# ═══════════════════════════════════════════════════════════════════════
+
+def apply_resize(
+    images_dir: str,
+    resize_mode: str = "",
+    resize_max_dim: int = 2000,
+    resize_factor: int = 4,
+    *,
+    progress_cb: ProgressCB = None,
+) -> None:
+    """Resize all images in *images_dir* in-place."""
+    if not resize_mode:
+        return
+
+    all_paths = collect_image_files([images_dir])
+    total = len(all_paths)
+
+    for idx, p in enumerate(all_paths):
+        img = cv2.imread(p)
+        if img is None:
+            continue
+        h, w = img.shape[:2]
+
+        if resize_mode == "downscale":
+            if resize_factor <= 1:
+                continue
+            img = resize_image(img, width=w // resize_factor,
+                               height=h // resize_factor, keep_aspect=False)
+        elif resize_mode == "max_dim":
+            img = resize_image(img, max_dim=resize_max_dim)
+
+        cv2.imwrite(p, img)
+        if progress_cb:
+            progress_cb(int((idx + 1) / total * 100),
+                        f"Resizing: {Path(p).name} ({idx + 1}/{total})")
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Image copy helper (from input folders to output images dir)
+# ═══════════════════════════════════════════════════════════════════════
+
+def copy_input_images(image_paths: list[str], images_dir: str) -> list[str]:
+    """Copy images from input folders into *images_dir*.
+
+    Returns the list of destination paths.
+    """
+    os.makedirs(images_dir, exist_ok=True)
+    copied: list[str] = []
+    for folder in image_paths:
+        for src in collect_image_files([folder]):
+            dst = os.path.join(images_dir, os.path.basename(src))
+            if src != dst:
+                shutil.copy2(src, dst)
+            copied.append(dst)
+    return copied

@@ -6,10 +6,7 @@ from __future__ import annotations
 
 import logging
 import os
-from pathlib import Path
 
-import cv2
-import numpy as np
 from PyQt6.QtCore import QObject, QRunnable, pyqtSignal, pyqtSlot
 
 logger = logging.getLogger(__name__)
@@ -67,53 +64,21 @@ class FrameExtractionWorker(QRunnable):
 
     @pyqtSlot()
     def run(self) -> None:
-        from .utils import analyze_video, compute_frame_indices, resize_image
+        from .pipeline_core import extract_frames
         self._running = True; self.signals.started.emit()
-        os.makedirs(self.output_dir, exist_ok=True)
-        all_paths: list[str] = []
-
         try:
-            total = len(self.video_paths)
-            for vi, vp in enumerate(self.video_paths):
-                if not self._running: break
-                self.signals.progress.emit(int(vi / total * 100), f"Analyzing: {Path(vp).name}")
-                info = analyze_video(vp)
-                frames = compute_frame_indices(
-                    info["total_frames"], info["fps"], method=self.method,
-                    interval=self.interval, target_fps=self.target_fps,
-                    start_seconds=self.start_seconds, end_seconds=self.end_seconds,
-                    max_frames=self.max_frames)
-                cap = cv2.VideoCapture(vp)
-                try:
-                    for fi, fn in enumerate(frames):
-                        if not self._running: break
-                        cap.set(cv2.CAP_PROP_POS_FRAMES, fn)
-                        ret, frame = cap.read()
-                        if not ret: continue
-                        # inline resize
-                        if self.resize_mode == "max_dim" and self.resize_max_dim:
-                            frame = resize_image(frame, max_dim=self.resize_max_dim)
-                        elif self.resize_mode == "downscale" and self.resize_factor > 1:
-                            h, w = frame.shape[:2]
-                            frame = resize_image(frame, width=w // self.resize_factor,
-                                                  height=h // self.resize_factor,
-                                                  keep_aspect=False)
-                        name = f"{Path(vp).stem}_f{fn:06d}{self.output_format}"
-                        out = os.path.join(self.output_dir, name)
-                        params = []
-                        if self.output_format.lower() in (".jpg", ".jpeg"):
-                            params = [cv2.IMWRITE_JPEG_QUALITY, self.jpg_quality]
-                        elif self.output_format.lower() == ".png":
-                            params = [cv2.IMWRITE_PNG_COMPRESSION, 3]
-                        cv2.imwrite(out, frame, params); all_paths.append(out)
-                        pct = int((vi + fi / len(frames)) / total * 100)
-                        self.signals.progress.emit(pct,
-                            f"Extracting: {Path(vp).name} ({fi + 1}/{len(frames)})")
-                finally:
-                    cap.release()
+            all_paths = extract_frames(
+                video_paths=self.video_paths, output_dir=self.output_dir,
+                method=self.method, interval=self.interval,
+                target_fps=self.target_fps, start_seconds=self.start_seconds,
+                end_seconds=self.end_seconds, max_frames=self.max_frames,
+                resize_mode=self.resize_mode, resize_max_dim=self.resize_max_dim,
+                resize_factor=self.resize_factor, output_format=self.output_format,
+                jpg_quality=self.jpg_quality,
+                progress_cb=lambda pct, msg: self.signals.progress.emit(pct, msg),
+                cancel_check=lambda: not self._running,
+            )
             if not self._running:
-                # Stopped mid-way — do not signal finished, so the pipeline
-                # does not advance to the next stage.
                 logger.info("Frame extraction stopped by user")
                 return
             self.signals.progress.emit(100, "Frame extraction complete!")
@@ -127,12 +92,6 @@ class FrameExtractionWorker(QRunnable):
 # ═══════════════════════════════════════════════════════════════════════
 # SAM Segmentation Worker
 # ═══════════════════════════════════════════════════════════════════════
-
-# Long-side bound for mask accumulation: SAM3's image encoder resizes to its
-# native 1008x1008 regardless, so this bounds decoder output + compositing
-# without any encoder-side cost. Masks are upscaled back to the frame size.
-_SAM_MAX_INFER_DIM = 1024
-
 
 class SAMWorker(QRunnable):
     """Run SAM3 text-prompt segmentation on a directory of images.
@@ -154,126 +113,27 @@ class SAMWorker(QRunnable):
 
     @pyqtSlot()
     def run(self) -> None:
+        from .pipeline_core import run_sam_segmentation
         self._running = True; self.signals.started.emit()
         os.makedirs(self.mask_output_dir, exist_ok=True)
-        mask_paths: list[str] = []
 
         try:
-            model = self._load_sam()
-            total = len(self.image_paths)
-            if total == 0:
-                self.signals.finished.emit(mask_paths)
-                return
-
-            # Validate the model/prompt wiring once on the first image. A
-            # systemic failure (bad shape, wrong input names) would otherwise
-            # surface only after the whole batch silently produced blank masks.
-            try:
-                self._predict_sam(model, self.image_paths[0])
-            except Exception as e:
-                logger.exception("SAM validation failed on first image")
-                self.signals.error.emit(
-                    f"SAM failed on first image: {type(e).__name__}: {e}")
-                return
-
-            failed = 0
-            for idx, img_path in enumerate(self.image_paths):
-                if not self._running: break
-                pct = int(idx / total * 100)
-                name = Path(img_path).name
-                self.signals.progress.emit(pct, f"SAM: {name} ({idx + 1}/{total})")
-                try:
-                    mask = self._predict_sam(model, img_path)
-                    mp = self._save(img_path, mask); mask_paths.append(mp)
-                    self.signals.image_done.emit(img_path, mp)
-                except Exception as e:
-                    # A blank mask is a *valid* result ("nothing matched"), so a
-                    # swallowed per-image crash is indistinguishable from a
-                    # working run that found nothing. Keep going; only the
-                    # first image aborts (systemic failure, caught above).
-                    failed += 1
-                    logger.warning("SAM failed for %s: %s", img_path, e)
-                    img = cv2.imread(img_path)
-                    if img is not None:
-                        mp = self._save(img_path, np.zeros(img.shape[:2], dtype=np.uint8))
-                        mask_paths.append(mp)
-
+            mask_paths = run_sam_segmentation(
+                image_paths=self.image_paths,
+                mask_output_dir=self.mask_output_dir,
+                model_config=self.model_config,
+                target_classes=self.target_classes,
+                confidence_threshold=self.confidence_threshold,
+                progress_cb=lambda pct, msg: self.signals.progress.emit(pct, msg),
+                image_done_cb=lambda ip, mp: self.signals.image_done.emit(ip, mp),
+                cancel_check=lambda: not self._running,
+            )
             if not self._running:
-                # Stopped mid-way — do not signal finished, so the pipeline
-                # does not advance to the database stage.
                 logger.info("SAM segmentation stopped by user")
                 return
-            self.signals.progress.emit(
-                100, f"SAM segmentation complete ({failed}/{total} images failed)"
-                if failed else "SAM segmentation complete!")
             self.signals.finished.emit(mask_paths)
         except Exception as e:
             logger.exception("SAM worker failed"); self.signals.error.emit(str(e))
-
-    def _load_sam(self):
-        """Build the SAM3 model, refusing configs without a language encoder.
-
-        Without the language encoder the decoder runs on zero-filled language
-        tensors: it still emits masks, so prompts would look "ignored" rather
-        than failing. Refuse up front instead.
-        """
-        from .sam_backends.sam3_onnx import SegmentAnything3ONNX
-        dp = self.model_config["decoder_model_path"]
-        lang_path = self.model_config.get("language_encoder_path")
-        if not lang_path or not os.path.isfile(lang_path):
-            raise RuntimeError(
-                "SAM3 model has no language encoder — text prompts cannot "
-                "be applied.\n"
-                f"Looked for it in: {self.model_config.get('config_file') or dp}\n"
-                "Re-download the model, or pick a different one.")
-        return SegmentAnything3ONNX(
-            image_encoder_path=self.model_config["encoder_model_path"],
-            decoder_model_path=dp,
-            language_encoder_path=lang_path)
-
-    def _predict_sam(self, model, img_path: str) -> np.ndarray:
-        img = cv2.imread(img_path)
-        if img is None: raise RuntimeError(f"Cannot read: {img_path}")
-        orig_h, orig_w = img.shape[:2]
-
-        # The image encoder always resizes to its 1008x1008 native size, so
-        # downscaling the input here costs nothing on the encoder side but
-        # keeps the decoder output and mask accumulation bounded on large
-        # frames. Final mask is upscaled back to the original size.
-        h, w = orig_h, orig_w
-        if max(h, w) > _SAM_MAX_INFER_DIM:
-            scale = _SAM_MAX_INFER_DIM / max(h, w)
-            h, w = int(h * scale), int(w * scale)
-            img = cv2.resize(img, (w, h), interpolation=cv2.INTER_LINEAR)
-
-        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        combined = np.zeros((h, w), dtype=np.uint8)
-
-        for ci, cls_name in enumerate(self.target_classes):
-            if not self._running: break
-            if ci == 0:
-                embedding = model.encode(img_rgb, text_prompt=cls_name)
-            else:
-                embedding = model.update_language(embedding, cls_name)
-            masks = model.predict_masks(
-                embedding, prompt=[],
-                confidence_threshold=self.confidence_threshold)
-            for m in masks:
-                if m.ndim == 3 and m.shape[0] == 1: m = m[0]
-                combined = np.maximum(combined, (m > 0).astype(np.uint8) * 255)
-
-        if (h, w) != (orig_h, orig_w):
-            combined = cv2.resize(
-                combined, (orig_w, orig_h), interpolation=cv2.INTER_NEAREST)
-
-        logger.debug("SAM3 %s: %d classes, mask %.1f%% non-zero",
-                     Path(img_path).name, len(self.target_classes),
-                     100 * np.count_nonzero(combined) / combined.size)
-        return combined
-
-    def _save(self, img_path: str, mask: np.ndarray) -> str:
-        out = os.path.join(self.mask_output_dir, f"{Path(img_path).stem}_mask.png")
-        cv2.imwrite(out, mask); return out
 
     def stop(self) -> None: self._running = False
 
@@ -281,13 +141,6 @@ class SAMWorker(QRunnable):
 # ═══════════════════════════════════════════════════════════════════════
 # SkyWater Segmentation Worker (SegFormer-B2, 4-class: Sky/Water/Person)
 # ═══════════════════════════════════════════════════════════════════════
-
-SW_INPUT_SIZE = (384, 384)
-SW_CLASSES = ["Background", "Sky", "Water", "Person"]
-SW_CLASS_IDS = {name.lower(): i for i, name in enumerate(SW_CLASSES)}
-IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
-IMAGENET_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
-
 
 class SkyWaterWorker(QRunnable):
     """Run SkyWater SegFormer ONNX model for fast sky/water/person segmentation."""
@@ -303,63 +156,23 @@ class SkyWaterWorker(QRunnable):
 
     @pyqtSlot()
     def run(self) -> None:
+        from .pipeline_core import run_skywater_segmentation
         self._running = True; self.signals.started.emit()
         os.makedirs(self.mask_output_dir, exist_ok=True)
-        mask_paths: list[str] = []
 
         try:
-            from .onnx_utils import create_inference_session
-            target_ids = set()
-            for cls_name in self.target_classes:
-                cid = SW_CLASS_IDS.get(cls_name.lower())
-                if cid is not None: target_ids.add(cid)
-            # always map: sky, water, person → if user selects any, include it
-            if not target_ids:
-                target_ids = {1, 2, 3}  # default: mask sky+water+person
-
-            # GPU-accelerated session (CUDA → CoreML → CPU fallback).
-            sess = create_inference_session(self.model_path)
-            providers_used = sess.get_providers()
-            logger.info("SkyWater session providers: %s", providers_used)
-            in_name = sess.get_inputs()[0].name
-            out_name = sess.get_outputs()[0].name
-            total = len(self.image_paths)
-
-            for idx, img_path in enumerate(self.image_paths):
-                if not self._running: break
-                pct = int(idx / total * 100)
-                name = Path(img_path).name
-                self.signals.progress.emit(pct, f"SkyWater: {name} ({idx + 1}/{total})")
-
-                img = cv2.imread(img_path)
-                if img is None: continue
-                h, w = img.shape[:2]
-                img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-
-                # preprocess
-                inp = cv2.resize(img_rgb, SW_INPUT_SIZE).astype(np.float32) / 255.0
-                inp = (inp - IMAGENET_MEAN) / IMAGENET_STD
-                inp = inp.transpose(2, 0, 1)[np.newaxis, ...]
-
-                # inference
-                logits = sess.run([out_name], {in_name: inp})[0]  # (1,4,384,384)
-                mask_small = np.argmax(logits[0], axis=0).astype(np.uint8)  # (384,384)
-                # resize back + filter to target classes
-                mask_full = cv2.resize(mask_small, (w, h), interpolation=cv2.INTER_NEAREST)
-                final = np.zeros((h, w), dtype=np.uint8)
-                for cid in target_ids:
-                    final[mask_full == cid] = 255
-
-                mp = os.path.join(self.mask_output_dir, f"{Path(img_path).stem}_mask.png")
-                cv2.imwrite(mp, final); mask_paths.append(mp)
-                self.signals.image_done.emit(img_path, mp)
-
+            mask_paths = run_skywater_segmentation(
+                image_paths=self.image_paths,
+                mask_output_dir=self.mask_output_dir,
+                model_path=self.model_path,
+                target_classes=self.target_classes,
+                progress_cb=lambda pct, msg: self.signals.progress.emit(pct, msg),
+                image_done_cb=lambda ip, mp: self.signals.image_done.emit(ip, mp),
+                cancel_check=lambda: not self._running,
+            )
             if not self._running:
-                # Stopped mid-way — do not signal finished, so the pipeline
-                # does not advance to the database stage.
                 logger.info("SkyWater segmentation stopped by user")
                 return
-            self.signals.progress.emit(100, "SkyWater segmentation complete!")
             self.signals.finished.emit(mask_paths)
         except Exception as e:
             logger.exception("SkyWater worker failed"); self.signals.error.emit(str(e))
@@ -486,26 +299,19 @@ class DatabaseBuildWorker(QRunnable):
 
     @pyqtSlot()
     def run(self) -> None:
-        from .camera_models import get_camera_model
-        from .colmap_database import ColmapDatabase
-        from .utils import collect_image_files
+        from .pipeline_core import build_database
         self._running = True; self.signals.started.emit()
         try:
-            self.signals.progress.emit(10, "Collecting images...")
-            paths = collect_image_files([self.image_dir], recursive=False)
-            if not paths: raise FileNotFoundError(f"No images in {self.image_dir}")
-            self.signals.progress.emit(30, f"Found {len(paths)} images")
-            model = get_camera_model(self.camera_model_id)
-            self.signals.progress.emit(50, "Building database...")
-            db = ColmapDatabase(self.db_path)
-            db.reset()  # rebuild → fresh DB (avoids UNIQUE collisions on images.name)
-            with db:
-                r = db.build_project(self.image_dir, model, self.camera_params, self.prior_focal_length)
+            build_database(
+                image_dir=self.image_dir, db_path=self.db_path,
+                camera_model_id=self.camera_model_id,
+                camera_params=self.camera_params,
+                prior_focal_length=self.prior_focal_length,
+                progress_cb=lambda pct, msg: self.signals.progress.emit(pct, msg),
+            )
             if not self._running:
-                # Stopped — the pipeline terminates; do not signal finished.
                 logger.info("Database build stopped by user")
                 return
-            self.signals.progress.emit(100, f"Ready: {r['image_count']} images, {model.name}")
             self.signals.finished.emit(self.db_path)
         except Exception as e:
             logger.exception("Database build failed"); self.signals.error.emit(str(e))

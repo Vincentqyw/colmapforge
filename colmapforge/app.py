@@ -3,8 +3,9 @@
 COLMAP Forge — Standalone Application Launcher.
 
 Usage:
-    colmapforge
-    python -m colmapforge.app
+    colmapforge                  Launch the GUI
+    colmapforge run [options]    Run the CLI pipeline (headless)
+    colmapforge run --help       Show CLI options
 """
 
 from __future__ import annotations
@@ -12,9 +13,6 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-
-from PyQt6.QtGui import QFont
-from PyQt6.QtWidgets import QApplication
 
 
 def setup_logging(level: str = "INFO") -> None:
@@ -25,13 +23,10 @@ def setup_logging(level: str = "INFO") -> None:
     )
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="COLMAP Forge")
-    parser.add_argument("--log-level", default="INFO",
-                        choices=["DEBUG", "INFO", "WARNING", "ERROR"])
-    args = parser.parse_args(argv)
-    setup_logging(args.log_level)
-
+def _launch_gui(log_level: str) -> int:
+    """Launch the PyQt6 GUI.  Imported lazily so the CLI path never pays the
+    Qt startup cost."""
+    setup_logging(log_level)
     logger = logging.getLogger(__name__)
     logger.info("Starting COLMAP Forge...")
 
@@ -40,6 +35,9 @@ def main(argv: list[str] | None = None) -> int:
     # discover it from a slow segmentation run.
     from .onnx_utils import log_diagnostics
     log_diagnostics()
+
+    from PyQt6.QtGui import QFont
+    from PyQt6.QtWidgets import QApplication
 
     app = QApplication(sys.argv)
     app.setApplicationName("COLMAP Forge")
@@ -78,6 +76,24 @@ def main(argv: list[str] | None = None) -> int:
     window.show()
     logger.info("Window shown")
     return app.exec()
+
+
+def main(argv: list[str] | None = None) -> int:
+    # ── Dispatch: "colmapforge run ..." → CLI, otherwise GUI ──
+    if argv is None:
+        argv = sys.argv[1:]
+
+    if len(argv) >= 1 and argv[0] == "run":
+        from .cli import run_cli
+        return run_cli(argv[1:])
+
+    # ── GUI mode ──
+    parser = argparse.ArgumentParser(prog="colmapforge",
+                                     description="COLMAP Forge")
+    parser.add_argument("--log-level", default="INFO",
+                        choices=["DEBUG", "INFO", "WARNING", "ERROR"])
+    args = parser.parse_args(argv)
+    return _launch_gui(args.log_level)
 
 
 if __name__ == "__main__":
