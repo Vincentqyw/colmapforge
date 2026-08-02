@@ -163,8 +163,10 @@ uv sync --extra gpu    # or --extra cpu
 **NVIDIA CUDA requirements:**
 
 - Driver ≥ 580 (CUDA 13)
-- CUDA 13.x Toolkit on PATH
-- cuDNN 9 + cuBLAS 13 bundled in `onnxruntime-gpu`
+- **Linux**: cuDNN 9 + cuBLAS 13 come bundled via pip (`onnxruntime-gpu[cuda,cudnn]`)
+- **Windows**: the nvidia pip wheels are Linux-only — install the CUDA 13.x
+  Toolkit and cuDNN 9 system-wide and make sure their `bin` directories are
+  on `PATH`
 
 </details>
 

@@ -90,7 +90,8 @@ jobs:
         uses: astral-sh/setup-uv@v3
 
       - name: Install dependencies (CUDA onnxruntime-gpu)
-        # Requires NVIDIA GPU with CUDA 13.x runtime at runtime.
+        # Requires NVIDIA GPU + system CUDA 13.x Toolkit + cuDNN 9 at runtime
+        # (the nvidia pip wheels are Linux-only, so nothing is bundled here).
         # The CI runner does NOT have a GPU; we only package the binaries.
         run: uv sync --extra gpu --no-dev
 

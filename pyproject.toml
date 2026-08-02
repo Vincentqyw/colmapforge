@@ -28,7 +28,12 @@ dependencies = [
 # CPU ONNX Runtime (all platforms).  On macOS includes CoreML for Apple Silicon.
 cpu = ["onnxruntime>=1.28.0"]
 # CUDA acceleration — Linux & Windows only (NVIDIA GPU + CUDA runtime).
-gpu = ["onnxruntime-gpu[cuda,cudnn]>=1.28.0"]
+# The [cuda,cudnn] extras pull nvidia-* wheels that exist ONLY for Linux;
+# Windows needs a system-wide CUDA 13 Toolkit + cuDNN 9 install instead.
+gpu = [
+    "onnxruntime-gpu[cuda,cudnn]>=1.28.0; sys_platform == 'linux'",
+    "onnxruntime-gpu>=1.28.0; sys_platform == 'win32'",
+]
 
 [project.scripts]
 colmapforge = "colmapforge.app:main"
