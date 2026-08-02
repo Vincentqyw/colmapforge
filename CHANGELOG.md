@@ -14,6 +14,12 @@ All notable changes to this project are documented in this file.
 - Sensible CLI defaults and richer top-level help.
 - SAM3 runs on GPU when VRAM >= 8 GB; CUDA/cuDNN bundled via pip extras.
 
+### Fixes
+- Windows: `uv sync --extra gpu` no longer fails to resolve — the
+  `[cuda,cudnn]` pip extras are Linux-only (the nvidia-* wheels ship no
+  Windows builds); Windows uses the plain `onnxruntime-gpu` wheel with a
+  system CUDA 13 + cuDNN 9 install.
+
 ### Refactor
 - Drop the osam dependency — the CLIP BPE tokenizer is now vendored.
 - Remove dead code and dedupe GUI/CLI pipeline logic.
