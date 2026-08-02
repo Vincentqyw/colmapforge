@@ -15,6 +15,9 @@ All notable changes to this project are documented in this file.
 - SAM3 runs on GPU when VRAM >= 8 GB; CUDA/cuDNN bundled via pip extras.
 
 ### Fixes
+- Packaged builds (all platforms): bundle the vendored CLIP BPE vocabulary
+  file; release bundles crashed at segmentation with "No such file or
+  directory: bpe_simple_vocab_16e6.txt.gz".
 - Windows: `uv sync --extra gpu` no longer fails to resolve — the
   `[cuda,cudnn]` pip extras are Linux-only (the nvidia-* wheels ship no
   Windows builds); Windows uses the plain `onnxruntime-gpu` wheel with a

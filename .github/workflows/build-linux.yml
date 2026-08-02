@@ -54,6 +54,7 @@ jobs:
           uv run pyinstaller --noconfirm --windowed --name "COLMAP-Forge" \
             --add-data "colmapforge/views/styles:colmapforge/views/styles" \
             --add-data "colmapforge/configs:colmapforge/configs" \
+            --add-data "colmapforge/sam_backends/clip/bpe_simple_vocab_16e6.txt.gz:colmapforge/sam_backends/clip" \
             --collect-submodules colmapforge \
             --collect-all cv2 \
             --collect-all onnxruntime \
