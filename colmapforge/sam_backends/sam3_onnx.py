@@ -23,6 +23,9 @@ class SegmentAnything3ONNX:
         if language_encoder_path:
             self.language_encoder = SAM3LanguageEncoder(language_encoder_path)
         self.decoder = SAM3ImageDecoder(decoder_model_path)
+        # Language features depend only on the prompt text, so cache them —
+        # segmenting N images with C classes then costs C encoder runs, not N×C.
+        self._language_cache: dict[str, dict[str, Any]] = {}
 
     def encode(self, cv_image: np.ndarray, text_prompt=None) -> dict[str, Any]:
         """Encode an image (and optional text prompt) into an embedding dict.
@@ -62,16 +65,20 @@ class SegmentAnything3ONNX:
         new_embedding["language_features"] = None
         new_embedding["language_embeds"] = None
         if self.language_encoder is not None:
-            new_embedding.update(self.language_encoder.encode(text_prompt or "visual"))
+            text = text_prompt or "visual"
+            cached = self._language_cache.get(text)
+            if cached is None:
+                cached = self.language_encoder.encode(text)
+                self._language_cache[text] = cached
+            new_embedding.update(cached)
         return new_embedding
 
     def predict_masks(
         self,
         embedding: dict[str, Any],
-        prompt,
         confidence_threshold: float = 0.5,
     ) -> np.ndarray:
-        """Run the decoder for the given geometric prompt.
+        """Run the decoder; detections come from the language features.
 
         Returns
         -------
@@ -79,34 +86,10 @@ class SegmentAnything3ONNX:
         (shape ``(0, 1, H, W)``) when no confident detections are found.
         """
         original_size = embedding["original_size"]
-        box_coords = [0.0, 0.0, 0.0, 0.0]
-        box_labels = [1]
-        # box_masks: True  → no real box (text-only / dummy)
-        #            False → a real box is provided
-        box_masks = [True]
-
-        for mark in prompt:
-            if mark["type"] == "rectangle":
-                x1, y1, x2, y2 = mark["data"]
-                cx = (x1 + x2) / 2.0 / original_size[1]
-                cy = (y1 + y2) / 2.0 / original_size[0]
-                w = (x2 - x1) / original_size[1]
-                h = (y2 - y1) / original_size[0]
-                box_coords = [cx, cy, w, h]
-                box_masks = [False]
-                break
-            elif mark["type"] == "point":
-                x, y = mark["data"]
-                cx = x / original_size[1]
-                cy = y / original_size[0]
-                # Point is represented as a very small box (1 % of image).
-                box_coords = [cx, cy, 0.01, 0.01]
-                box_masks = [False]
-                break
-
-        box_coords_np = np.array(box_coords, dtype=np.float32).reshape(1, 1, 4)
-        box_labels_np = np.array([box_labels], dtype=np.int64)
-        box_masks_np = np.array([box_masks], dtype=np.bool_)
+        # Dummy box (box_masks=True → text-only prompt, no real box).
+        box_coords_np = np.zeros((1, 1, 4), dtype=np.float32)
+        box_labels_np = np.array([[1]], dtype=np.int64)
+        box_masks_np = np.array([[True]], dtype=np.bool_)
 
         masks, scores, _ = self.decoder(
             original_size,
@@ -134,7 +117,7 @@ class SegmentAnything3ONNX:
 
         # Guarantee masks come back at the input image resolution so callers
         # can composite them directly without a shape check.
-        return self.transform_masks(masks, original_size, None)
+        return self.transform_masks(masks, original_size)
 
     def update_language(self, embedding: dict, text_prompt: str) -> dict:
         """Re-encode just the language features for a different class term.
@@ -143,14 +126,12 @@ class SegmentAnything3ONNX:
         """
         return self._apply_language(embedding, text_prompt)
 
-    def transform_masks(self, masks, original_size, transform_matrix=None):
+    def transform_masks(self, masks, original_size):
         """Resize masks to *original_size* if the decoder emitted them at its
         native resolution instead (some exports do).
 
         Masks are boolean ``(N, 1, H, W)``; nearest-neighbour keeps them
         binary.  Shapes already matching *original_size* are returned as-is.
-        *transform_matrix* is accepted for interface parity with the SAM1/2
-        backends but unused.
         """
         if masks.shape[2:] == tuple(original_size):
             return masks

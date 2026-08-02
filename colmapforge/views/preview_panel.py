@@ -25,10 +25,16 @@ class PreviewPanel(QWidget):
         super().__init__(parent)
         self._all_output_images: list[str] = []
         self._current_image: str = ""
-        self._mask_cache: dict[str, np.ndarray] = {}
+        self._mask_cache: dict[str, str] = {}  # image path → mask path
         self._preview_key = None
         self._preview_full: QPixmap | None = None
         self._current_size: tuple[int, int] | None = None
+        # One-entry decode memos: masks/images are decoded lazily for the
+        # image on screen only, so RAM stays flat however many frames exist.
+        self._img_loaded_path: str | None = None
+        self._img_loaded: np.ndarray | None = None
+        self._mask_loaded_path: str | None = None
+        self._mask_loaded: np.ndarray | None = None
 
         ly = QVBoxLayout(self); ly.setContentsMargins(8, 6, 8, 6); ly.setSpacing(3)
 
@@ -76,9 +82,13 @@ class PreviewPanel(QWidget):
         self._all_output_images = images
         self.thumb_list.clear()
         for p in images: self.thumb_list.addItem(Path(p).name)
+        # A re-run may rewrite image files in place — drop the decode memo.
+        self._img_loaded_path = None; self._img_loaded = None
 
-    def set_mask_cache(self, cache: dict[str, np.ndarray]) -> None:
+    def set_mask_cache(self, cache: dict[str, str]) -> None:
         self._mask_cache = cache
+        # Mask files may have been rewritten (new run) — drop the decode memo.
+        self._mask_loaded_path = None; self._mask_loaded = None
 
     def set_current_image(self, path: str) -> None:
         self._current_image = path
@@ -98,16 +108,19 @@ class PreviewPanel(QWidget):
         if key == self._preview_key: return
         self._preview_key = key
 
-        img = cv2.imread(self._current_image)
-        if img is None:
-            self.preview_label.setText("Cannot load image"); return
+        if self._img_loaded_path != self._current_image:
+            img = cv2.imread(self._current_image)
+            if img is None:
+                self.preview_label.setText("Cannot load image"); return
+            self._img_loaded = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            self._img_loaded_path = self._current_image
+        img_rgb = self._img_loaded
 
-        h, w = img.shape[:2]
+        h, w = img_rgb.shape[:2]
         self._current_size = (w, h)
-        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-        mask = self._mask_cache.get(self._current_image)
-        if mask is not None and self.chk_show_mask.isChecked():
+        mask = self._load_mask(self._current_image) if self.chk_show_mask.isChecked() else None
+        if mask is not None:
             alpha = self.slider_opacity.value() / 100.0
             red = np.zeros_like(img_rgb); red[:, :, 0] = 255
             mask_bin = (mask > 127).astype(np.float32)
@@ -120,8 +133,15 @@ class PreviewPanel(QWidget):
 
         self._set_info(w, h)
 
-    def fit_in_view(self) -> None:
-        self._fit_preview()
+    def _load_mask(self, image_path: str) -> np.ndarray | None:
+        """Decode the mask for *image_path*, memoizing the last one loaded."""
+        mask_path = self._mask_cache.get(image_path)
+        if not mask_path:
+            return None
+        if self._mask_loaded_path != mask_path:
+            self._mask_loaded = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+            self._mask_loaded_path = mask_path
+        return self._mask_loaded
 
     def prev_image(self) -> None:
         if not self._all_output_images: return
@@ -157,6 +177,8 @@ class PreviewPanel(QWidget):
         self._preview_full = None
         self._preview_key = None
         self._current_size = None
+        self._img_loaded_path = None; self._img_loaded = None
+        self._mask_loaded_path = None; self._mask_loaded = None
         self.lbl_preview_info.setText("")
         self.preview_label.setText("Preview appears after Build (Ctrl+B)")
         self.thumb_list.clear()

@@ -12,10 +12,10 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import cv2
-import numpy as np
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
@@ -24,10 +24,14 @@ from PyQt6.QtWidgets import (
 )
 
 from .about_dialog import AboutDialog
+from .camera_models import DEFAULT_CAMERA_MODEL_ID
 from .logo import make_app_icon, make_logo_pixmap
 from .pipeline import PipelineConfig, PipelineOrchestrator
+from .pipeline_core import MASK_SUFFIX, output_layout
 from .theme import Theme, apply_theme
-from .utils import analyze_videos, collect_image_files, compute_frame_indices
+from .utils import (
+    analyze_videos, collect_image_files, colmap_gui_command, compute_frame_indices,
+)
 from .views.constants import _S
 from .views.icons import (
     _icon_folder, _icon_video,
@@ -62,8 +66,9 @@ class MainWindow(QMainWindow):
         self._video_info: list[dict] = []
         self._model_configs: list[dict] = []
         self._output_dir = ""
-        self._mask_cache: dict[str, np.ndarray] = {}
+        self._mask_cache: dict[str, str] = {}  # image path → mask path
         self._all_output_images: list[str] = []
+        self._last_count_scan = 0.0
 
         # ── create widgets ──
         self._pipeline = PipelineOrchestrator(self)
@@ -121,7 +126,6 @@ class MainWindow(QMainWindow):
             self._toolbar.set_gpu_status(f"  GPU: {diag['active_provider']}", "gpuStatusOk")
         else:
             self._toolbar.set_gpu_status("  GPU: CPU only", "gpuStatusWarn")
-        self._onnx_diag = diag
 
     def _show_onnx_diagnostics(self) -> None:
         from .onnx_utils import diagnose
@@ -239,17 +243,9 @@ class MainWindow(QMainWindow):
         self._input_section.clear_requested.connect(self._on_clear_input)
         self._input_section.context_menu_remove.connect(self._on_input_context_menu)
 
-        # Extract section
+        # Extract section (the other sections need no reactive updates —
+        # their state is read once when the pipeline starts)
         self._extract_section.config_changed.connect(self._update_extract_preview)
-
-        # Resize section
-        self._resize_section.config_changed.connect(self._update_resize_and_camera)
-
-        # Segmentation section
-        self._seg_section.config_changed.connect(lambda: None)  # no reactive update needed
-
-        # Camera section
-        self._camera_section.config_changed.connect(lambda: None)  # no reactive update needed
 
         # Output section
         self._output_section.browse_requested.connect(self._browse_output)
@@ -388,9 +384,6 @@ class MainWindow(QMainWindow):
                 pass
         self._extract_section.set_preview_text("  ·  ".join(lines) if lines else "")
 
-    def _update_resize_and_camera(self) -> None:
-        pass  # resize section updates its own result internally
-
     # ═══════════════════════════════════════════════════════════════════
     # Preview bridge
     # ═══════════════════════════════════════════════════════════════════
@@ -410,13 +403,10 @@ class MainWindow(QMainWindow):
         if os.path.isdir(masks_dir):
             stem_to_path = {Path(ip).stem: ip for ip in images}
             for mp in sorted(os.listdir(masks_dir)):
-                if mp.endswith("_mask.png"):
-                    stem = mp[:-len("_mask.png")]
-                    ip = stem_to_path.get(stem)
+                if mp.endswith(MASK_SUFFIX):
+                    ip = stem_to_path.get(mp[:-len(MASK_SUFFIX)])
                     if ip:
-                        mask = cv2.imread(os.path.join(masks_dir, mp), cv2.IMREAD_GRAYSCALE)
-                        if mask is not None:
-                            self._mask_cache[ip] = mask
+                        self._mask_cache[ip] = os.path.join(masks_dir, mp)
         self._preview.set_mask_cache(self._mask_cache)
         self._preview.refresh_preview()
 
@@ -481,7 +471,7 @@ class MainWindow(QMainWindow):
             seg_model_config=self._seg_section.model_config,
             seg_target_classes=self._seg_section.target_classes,
             seg_confidence=self._seg_section.confidence,
-            camera_model_id=self._camera_section.camera_model_id or 2,
+            camera_model_id=self._camera_section.camera_model_id or DEFAULT_CAMERA_MODEL_ID,
             camera_params=self._camera_section.camera_params,
         )
 
@@ -512,8 +502,12 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage(msg)
         # Update toolbar image count in real-time during extraction so the
         # user sees frames accumulating rather than a static number.
-        if self._output_dir:
-            images_dir = os.path.join(self._output_dir, "images")
+        # Throttled: the count comes from a directory scan, which would be
+        # O(N²) if run on every per-frame progress tick.
+        now = time.monotonic()
+        if self._output_dir and now - self._last_count_scan >= 0.5:
+            self._last_count_scan = now
+            images_dir = output_layout(self._output_dir)[0]
             if os.path.isdir(images_dir):
                 count = len(collect_image_files([images_dir]))
                 self._toolbar.set_image_count(count)
@@ -524,15 +518,13 @@ class MainWindow(QMainWindow):
                 self._preview.update_image_count(count)
 
     def _on_pipeline_mask_ready(self, img_path: str, mask_path: str) -> None:
-        mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
-        if mask is not None:
-            self._mask_cache[img_path] = mask
-            self._preview.set_mask_cache(self._mask_cache)
-            self._preview.set_current_image(img_path)
-            self._preview.refresh_preview()
+        self._mask_cache[img_path] = mask_path
+        self._preview.set_mask_cache(self._mask_cache)
+        self._preview.set_current_image(img_path)
+        self._preview.refresh_preview()
 
     def _on_pipeline_finished(self, db_path: str) -> None:
-        images_dir = os.path.join(self._output_dir, "images")
+        images_dir = output_layout(self._output_dir)[0]
         self._output_section.show_result(db_path, images_dir)
         self._preview.set_mask_cache(self._mask_cache)
 
@@ -550,27 +542,22 @@ class MainWindow(QMainWindow):
 
     def _launch_colmap(self, db_path: str, images_dir: str) -> None:
         """Launch COLMAP GUI pointing at the built database and images."""
+        masks_dir = os.path.join(os.path.dirname(images_dir), "masks")
+        cmd = colmap_gui_command(db_path, images_dir, masks_dir)
+
         colmap_exe = shutil.which("colmap")
         if colmap_exe is None:
             self.status_bar.showMessage(
-                "COLMAP not found on PATH — install it or run manually: "
-                f"colmap gui --database_path {db_path} --image_path {images_dir}"
+                "COLMAP not found on PATH — install it or run manually: " + " ".join(cmd)
             )
             return
 
-        masks_dir = os.path.join(os.path.dirname(images_dir), "masks")
-
         try:
             subprocess.Popen(
-                [colmap_exe, "gui",
-                 "--database_path", db_path,
-                 "--image_path", images_dir,
-                 "--ImageReader.mask_path", masks_dir],
+                [colmap_exe, *cmd[1:]],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             )
-            self.status_bar.showMessage(
-                f"COLMAP launched: {db_path}"
-            )
+            self.status_bar.showMessage(f"COLMAP launched: {db_path}")
         except Exception as e:
             logger.warning("Failed to launch COLMAP: %s", e)
             self.status_bar.showMessage(f"COLMAP launch failed: {e}")

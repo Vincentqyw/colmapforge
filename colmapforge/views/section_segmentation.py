@@ -7,32 +7,16 @@ custom class input, and collapsible class checkboxes.
 
 from __future__ import annotations
 
-from PyQt6.QtCore import pyqtSignal, Qt
-from PyQt6.QtGui import QPainter, QPen, QColor, QPixmap, QIcon
+from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import (
     QCheckBox, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QVBoxLayout, QWidget,
 )
 
+from ..pipeline_core import is_skywater_config
 from .constants import PRESET_CLASSES, QUICK_PRESETS, _W
+from .icons import _icon_clear
 from .widgets import _combo, _dspin, _grid_row, _label, _section_card, _section_header
-
-
-def _icon_clear(size: int = 14) -> QIcon:
-    """x icon for the clear-custom-classes button."""
-    app = __import__("PyQt6.QtWidgets", fromlist=["QApplication"]).QApplication.instance()
-    dpr = app.devicePixelRatio() if app else 1.0
-    if dpr < 1.0: dpr = 1.0
-    phys = max(1, int(size * dpr))
-    pm = QPixmap(phys, phys); pm.setDevicePixelRatio(dpr)
-    pm.fill(Qt.GlobalColor.transparent)
-    p = QPainter(pm); p.setRenderHint(QPainter.RenderHint.Antialiasing)
-    p.setPen(QPen(QColor("#ff3b30"), 2.0, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
-    m = size * 0.25
-    p.drawLine(int(m), int(m), int(size - m), int(size - m))
-    p.drawLine(int(size - m), int(m), int(m), int(size - m))
-    p.end()
-    return QIcon(pm)
 
 
 class SegmentationSection(QWidget):
@@ -151,9 +135,6 @@ class SegmentationSection(QWidget):
             has_text = " [TEXT]" if cfg.get("language_encoder_path") else ""
             self.cmb_sam_model.addItem(f"{label}{has_text}", cfg)
 
-    def add_model_item(self, label: str, cfg: dict) -> None:
-        self.cmb_sam_model.addItem(label, cfg)
-
     def apply_preset(self) -> None:
         self._apply_preset()
 
@@ -162,14 +143,7 @@ class SegmentationSection(QWidget):
     def _is_skywater_model(self) -> bool:
         """Check whether the currently selected model is SkyWater."""
         cfg = self.cmb_sam_model.currentData()
-        if not cfg:
-            return False
-        model_path = cfg.get("model_path", "")
-        return (
-            "skywater" in cfg.get("type", "").lower() or
-            "skywater" in cfg.get("name", "").lower() or
-            "skywater" in model_path.lower()
-        )
+        return bool(cfg) and is_skywater_config(cfg)
 
     def _on_model_changed(self) -> None:
         """When the model combo changes, update custom class hint."""

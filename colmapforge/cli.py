@@ -16,17 +16,18 @@ import argparse
 import logging
 import os
 
-from .camera_models import CAMERA_MODELS, CAMERA_MODEL_BY_NAME
+from .camera_models import CAMERA_MODELS, CAMERA_MODEL_BY_NAME, DEFAULT_CAMERA_MODEL_ID
 from .model_downloader import discover_models
-from .pipeline import PipelineConfig
 from .pipeline_core import (
+    PipelineConfig,
     apply_resize,
     build_database,
     copy_input_images,
     extract_frames,
+    output_layout,
     run_segmentation,
 )
-from .utils import collect_image_files
+from .utils import collect_image_files, colmap_gui_command
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +103,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # ── Camera ──
     grp_cam = parser.add_argument_group("Camera Model")
-    grp_cam.add_argument("--camera-model", default="2", metavar="ID_OR_NAME",
+    grp_cam.add_argument("--camera-model", default=str(DEFAULT_CAMERA_MODEL_ID), metavar="ID_OR_NAME",
                          help="Camera model ID (0–17) or name, e.g. SIMPLE_RADIAL (default: 2)")
     grp_cam.add_argument("--camera-params", type=float, nargs="*", default=None, metavar="F",
                          help="Custom camera intrinsic parameters (computed from image dims if omitted)")
@@ -237,9 +238,7 @@ class CLIPipeline:
         import shutil
 
         cfg = self._config
-        images_dir = os.path.join(cfg.output_dir, "images")
-        masks_dir = os.path.join(cfg.output_dir, "masks")
-        db_path = os.path.join(cfg.output_dir, "database.db")
+        images_dir, masks_dir, db_path = output_layout(cfg.output_dir)
 
         # ── Check if images already exist ──
         images_exist = os.path.isdir(images_dir) and collect_image_files([images_dir])
@@ -299,17 +298,6 @@ class CLIPipeline:
     def _run_extraction(self, images_dir: str) -> None:
         cfg = self._config
         self._log(f"Extracting frames from {len(cfg.video_paths)} video(s)...")
-
-        r_mode = ""
-        r_max = 0
-        r_factor = 1
-        if cfg.resize_enabled:
-            r_mode = cfg.resize_mode
-            if r_mode == "max_dim":
-                r_max = cfg.resize_max_dim
-            elif r_mode == "downscale":
-                r_factor = cfg.resize_factor
-
         paths = extract_frames(
             video_paths=cfg.video_paths,
             output_dir=images_dir,
@@ -317,9 +305,7 @@ class CLIPipeline:
             interval=cfg.extract_interval,
             target_fps=cfg.extract_target_fps,
             max_frames=cfg.extract_max_frames,
-            resize_mode=r_mode,
-            resize_max_dim=r_max,
-            resize_factor=r_factor,
+            **cfg.resize_kwargs(),
             output_format=cfg.extract_format,
             jpg_quality=cfg.extract_jpg_quality,
             progress_cb=self._progress_cb("Extract"),
@@ -331,9 +317,7 @@ class CLIPipeline:
         self._log(f"Resizing images (mode={cfg.resize_mode})...")
         apply_resize(
             images_dir=images_dir,
-            resize_mode=cfg.resize_mode,
-            resize_max_dim=cfg.resize_max_dim,
-            resize_factor=cfg.resize_factor,
+            **cfg.resize_kwargs(),
             progress_cb=self._progress_cb("Resize"),
         )
         self._log("  Resize complete.")
@@ -513,9 +497,8 @@ def run_cli(argv: list[str] | None = None) -> int:
         return 1
 
     # ── Summary ──
-    images_dir = os.path.join(config.output_dir, "images")
+    images_dir, masks_dir, _ = output_layout(config.output_dir)
     image_count = len(collect_image_files([images_dir])) if os.path.isdir(images_dir) else 0
-    masks_dir = os.path.join(config.output_dir, "masks")
     mask_count = len(collect_image_files([masks_dir])) if os.path.isdir(masks_dir) else 0
 
     print()
@@ -530,10 +513,8 @@ def run_cli(argv: list[str] | None = None) -> int:
     print("═" * 60)
     print()
     print("Next step — run COLMAP:")
-    print(f"  colmap gui --database_path {db_path} --image_path {images_dir}", end="")
-    if mask_count > 0:
-        print(f" --ImageReader.mask_path {masks_dir}", end="")
-    print()
+    print("  " + " ".join(colmap_gui_command(
+        db_path, images_dir, masks_dir if mask_count > 0 else None)))
     print()
 
     return 0

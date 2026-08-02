@@ -90,18 +90,6 @@ class ResizeSection(QWidget):
     def ds_factor(self) -> int:
         return self._ds_factor
 
-    @property
-    def config(self):
-        """Return current resize config as a hashable tuple, or None if disabled."""
-        if not self.chk_resize.isChecked():
-            return None
-        mode = self.cmb_resize_mode.currentData()
-        if mode == "max_dim":
-            return ("max_dim", self.spin_max_dim.value())
-        elif mode == "downscale":
-            return ("downscale", self._ds_factor)
-        return (mode,)
-
     # ── public API ──
 
     def set_image_dims(self, w: int, h: int) -> None:

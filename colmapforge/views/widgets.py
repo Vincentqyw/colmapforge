@@ -8,7 +8,6 @@ dependency. Used by section widgets and MainWindow itself.
 from __future__ import annotations
 
 from PyQt6.QtCore import QSize, Qt, QEvent, QObject
-from PyQt6.QtGui import QIcon, QPixmap
 from PyQt6.QtWidgets import (
     QCheckBox, QComboBox, QDoubleSpinBox, QGridLayout, QLabel, QSpinBox, QWidget,
 )
@@ -70,14 +69,10 @@ def _dspin(min_v=0.0, max_v=1e6, val=0.0, step=0.1, dec=2) -> QDoubleSpinBox:
     return s
 
 
-def _grid_row(grid: QGridLayout, row: int, label_text: str, field: QWidget, aux: QWidget | None = None):
-    """Add a label+field[+aux] row to a QGridLayout at the given row."""
+def _grid_row(grid: QGridLayout, row: int, label_text: str, field: QWidget):
+    """Add a label + field row to a QGridLayout at the given row."""
     grid.addWidget(_label(label_text), row, 0)
-    if aux is not None:
-        grid.addWidget(field, row, 1)
-        grid.addWidget(aux, row, 2)
-    else:
-        grid.addWidget(field, row, 1, 1, 2)
+    grid.addWidget(field, row, 1, 1, 2)
 
 
 def _section_card() -> tuple[QWidget, QGridLayout]:

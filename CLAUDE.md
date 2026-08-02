@@ -49,7 +49,7 @@ This is a **PyQt6 desktop GUI** (single-window wizard) and **CLI tool** that pre
 | `colmap_database.py` | `ColmapDatabase` context manager: creates a COLMAP-compatible SQLite DB (WAL mode, FK enabled), stores camera params as BLOBs via `struct.pack`, converts paths to relative |
 | `onnx_utils.py` | ONNX Runtime provider selection (CUDA → CoreML → CPU priority), diagnostics, and silent-overwrite auto-repair. The CPU wheel on macOS includes CoreML for Apple Silicon acceleration |
 | `theme.py` | Singleton `Theme` class: `apply_theme()` loads QSS from `views/styles/`, `_make_palette()` builds Apple HIG-inspired `QPalette` for dark/light |
-| `sam_backends/` | Three SAM ONNX inference backends (SAM1/SAM2/SAM3). SAM3 forces CPU EP to avoid GPU OOM. Each backend handles its own image preprocessing and prompt encoding |
+| `sam_backends/` | SAM3 ONNX inference backend (`SegmentAnything3ONNX`: image encoder + language encoder + decoder). Forces CPU EP to avoid GPU OOM; language features are cached per prompt text. SkyWater has no backend class — it is a single SegFormer session driven directly by `pipeline_core.run_skywater_segmentation()` |
 
 ### UI layout conventions
 
@@ -59,6 +59,6 @@ This is a **PyQt6 desktop GUI** (single-window wizard) and **CLI tool** that pre
 - ComboBoxes use `AdjustToMinimumContentsLengthWithIcon` + `min-width` in QSS to prevent dropdown width jumping
 - See `main_window.py` for exact spacing/widget constants (`_S`, `_W`)
 
-### SAM variant detection
+### Segmentation model dispatch
 
-In `workers.py` `_load_sam()`, the ONNX model graph is inspected to determine which backend class and prompting strategy to use (grid prompts for SAM1/2, text prompts for SAM3). See the method's implementation for the exact input-name detection logic.
+`pipeline_core.run_segmentation()` is the single dispatcher for both GUI and CLI: it classifies the model config via `is_skywater_config()`, auto-downloads missing weights through `model_downloader.download_model_entry()`, then runs `run_skywater_segmentation()` (SegFormer, fixed classes) or `run_sam_segmentation()` (SAM3, class names as text prompts). Shared conventions (`output_layout()`, `mask_path_for()`/`MASK_SUFFIX`, `PipelineConfig`) also live in `pipeline_core.py`.

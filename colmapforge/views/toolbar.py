@@ -79,7 +79,3 @@ class AppToolbar(QWidget):
 
     def set_logo(self, pixmap: QPixmap) -> None:
         self._lbl_logo.setPixmap(pixmap)
-
-    @property
-    def gpu_status_label(self) -> QLabel:
-        return self._lbl_gpu_status

@@ -78,26 +78,3 @@ def apply_theme(app: QApplication, theme: Theme) -> None:
     if qss_file.is_file():
         app.setStyleSheet(qss_file.read_text(encoding="utf-8"))
     app.setPalette(_make_palette(theme.is_dark))
-
-
-def theme_color(theme: Theme, key: str) -> str:
-    """Convenience: get a theme color for rare inline use (e.g. overlay tint)."""
-    light = {
-        "accent":        "#007aff",  "accent_hover": "#0056b3",
-        "success":       "#34c759",  "success_bg":   "#e8f8ed",
-        "warning":       "#ff9500",  "warning_bg":   "#fff4e5",
-        "info":          "#007aff",  "info_bg":      "#e5f1ff",
-        "separator":     "#c6c6c8",  "fill":         "#e5e5ea",
-        "text_primary":  "#000000",  "text_secondary": "#8e8e93",
-        "text_tertiary": "#c7c7cc",  "surface":      "#ffffff",
-    }
-    dark = {
-        "accent":        "#0a84ff",  "accent_hover": "#409cff",
-        "success":       "#30d158",  "success_bg":   "#1b3a1b",
-        "warning":       "#ff9f0a",  "warning_bg":   "#3d2b00",
-        "info":          "#0a84ff",  "info_bg":      "#0a2540",
-        "separator":     "#38383a",  "fill":         "#3a3a3c",
-        "text_primary":  "#ffffff",  "text_secondary": "#8e8e93",
-        "text_tertiary": "#48484a",  "surface":      "#2c2c2e",
-    }
-    return (dark if theme.is_dark else light).get(key, "")

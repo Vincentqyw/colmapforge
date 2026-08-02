@@ -112,11 +112,6 @@ def make_logo_pixmap(size: int, is_dark: bool | None = None) -> QPixmap:
     return pm
 
 
-def make_logo_icon(size: int, is_dark: bool | None = None) -> QIcon:
-    """Render the logo as a QIcon at the given logical size."""
-    return QIcon(make_logo_pixmap(size, is_dark))
-
-
 def make_app_icon() -> QIcon:
     """Multi-resolution window icon covering 16/32/64/128 px.
 

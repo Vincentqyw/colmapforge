@@ -130,23 +130,6 @@ class ColmapDatabase:
         )
         return cur.lastrowid
 
-    def add_image(
-        self, name: str, camera_id: int,
-        prior_position: tuple[float, ...] | None = None,
-    ) -> int:
-        if prior_position:
-            qw, qx, qy, qz, tx, ty, tz = prior_position
-            cur = self._conn.execute(
-                "INSERT INTO images (name, camera_id, prior_qw, prior_qx, prior_qy, "
-                "prior_qz, prior_tx, prior_ty, prior_tz) VALUES (?,?,?,?,?,?,?,?,?)",
-                (name, camera_id, qw, qx, qy, qz, tx, ty, tz),
-            )
-        else:
-            cur = self._conn.execute(
-                "INSERT INTO images (name, camera_id) VALUES (?,?)", (name, camera_id),
-            )
-        return cur.lastrowid
-
     def add_images_batch(
         self, image_paths: list[str], camera_id: int,
         base_dir: str | None = None,

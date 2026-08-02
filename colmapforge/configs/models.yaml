@@ -15,7 +15,6 @@
   display_name: "SkyWater SegFormer-B2 (FP16)"
   type: skywater
   download_url: "https://huggingface.co/Realcat/skywater_seg/resolve/main/skywater_segformer_b2_fp16.onnx"
-  repo_id: "Realcat/skywater_seg"
   filename: "skywater_segformer_b2_fp16.onnx"
   size_hint_mb: 48
 
@@ -23,7 +22,6 @@
   display_name: "SkyWater SegFormer-B2 (FP32)"
   type: skywater
   download_url: "https://huggingface.co/Realcat/skywater_seg/resolve/main/skywater_segformer_b2_fp32.onnx"
-  repo_id: "Realcat/skywater_seg"
   filename: "skywater_segformer_b2_fp32.onnx"
   size_hint_mb: 95
 

@@ -51,12 +51,6 @@ class InputSection(QWidget):
 
         ly.addWidget(card)
 
-    # ── properties ──
-
-    @property
-    def has_input(self) -> bool:
-        return self.input_list.count() > 0
-
     # ── public API ──
 
     def set_info(self, text: str) -> None:

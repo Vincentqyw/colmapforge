@@ -1,4 +1,4 @@
-"""Model discovery and download — SAM (zip) + SkyWater (HF Hub).
+"""Model discovery and download — SAM (zip) + SkyWater (single ONNX file).
 
 On first launch, scans the built-in ``models.yaml`` registry and creates
 stub config.yaml files under ``~/.colmapforge/models/<name>/`` for
@@ -86,15 +86,6 @@ def _load_sam_registry() -> list[dict]:
 
 
 # ── Registry helpers ─────────────────────────────────────────────────
-
-
-def is_huggingface_hub_available() -> bool:
-    """Return ``True`` if the ``huggingface_hub`` package can be imported."""
-    try:
-        import huggingface_hub  # noqa: F401
-        return True
-    except ImportError:
-        return False
 
 
 def get_model_info(logical_name: str) -> dict | None:
@@ -235,6 +226,28 @@ def _build_stub_config(entry: dict, model_dir: str) -> dict:
     }
 
 
+def _cached_sam_config(entry: dict, model_dir: str) -> dict | None:
+    """Return the built config when a zip model is already on disk, else None.
+
+    "On disk" means either extracted ONNX files exist, or the local
+    config.yaml says ``has_downloaded: true``.
+    """
+    if not os.path.isdir(model_dir):
+        return None
+    if any(f.endswith(".onnx") for f in os.listdir(model_dir)):
+        return _build_sam_config(entry, model_dir)
+    cfg_path = os.path.join(model_dir, "config.yaml")
+    if os.path.isfile(cfg_path):
+        try:
+            with open(cfg_path, encoding="utf-8-sig") as f:
+                disk_cfg = yaml.safe_load(f) or {}
+            if disk_cfg.get("has_downloaded", False):
+                return _build_sam_config(entry, model_dir)
+        except Exception:
+            pass
+    return None
+
+
 def _skywater_config(entry: dict, model_path: str | None) -> dict:
     """Build a SkyWater config (single-file model)."""
     size_tag = ""
@@ -274,22 +287,8 @@ def discover_models() -> list[dict]:
 
         if _is_zip_entry(entry):
             # SAM3: zip → downloaded when ONNX files exist on disk.
-            cfg_path = os.path.join(model_dir, "config.yaml")
-            if os.path.isdir(model_dir):
-                onnx_files = [f for f in os.listdir(model_dir) if f.endswith(".onnx")]
-                if onnx_files:
-                    configs.append(_build_sam_config(entry, model_dir))
-                    continue
-                if os.path.isfile(cfg_path):
-                    try:
-                        with open(cfg_path, encoding="utf-8-sig") as f:
-                            disk_cfg = yaml.safe_load(f) or {}
-                        if disk_cfg.get("has_downloaded", False):
-                            configs.append(_build_sam_config(entry, model_dir))
-                            continue
-                    except Exception:
-                        pass
-            configs.append(_build_stub_config(entry, model_dir))
+            cached = _cached_sam_config(entry, model_dir)
+            configs.append(cached if cached else _build_stub_config(entry, model_dir))
         else:
             # SkyWater: single-file model → downloaded when the file exists.
             local = os.path.join(model_dir, entry.get("filename", name + ".onnx"))
@@ -425,23 +424,11 @@ def download_model_entry(
     model_dir = os.path.join(MODELS_ROOT, logical_name)
 
     if _is_zip_entry(entry):
-        cfg_path = os.path.join(model_dir, "config.yaml")
-        if os.path.isdir(model_dir):
-            onnx_files = [f for f in os.listdir(model_dir) if f.endswith(".onnx")]
-            if onnx_files:
-                if progress_callback:
-                    progress_callback(f"Using cached {logical_name}", 100, 100)
-                return _build_sam_config(entry, model_dir)
-            if os.path.isfile(cfg_path):
-                try:
-                    with open(cfg_path, encoding="utf-8-sig") as f:
-                        disk_cfg = yaml.safe_load(f) or {}
-                    if disk_cfg.get("has_downloaded", False):
-                        if progress_callback:
-                            progress_callback(f"Using cached {logical_name}", 100, 100)
-                        return _build_sam_config(entry, model_dir)
-                except Exception:
-                    pass
+        cached = _cached_sam_config(entry, model_dir)
+        if cached:
+            if progress_callback:
+                progress_callback(f"Using cached {logical_name}", 100, 100)
+            return cached
         _download_zip(entry, model_dir, progress_callback)
         if progress_callback:
             progress_callback(f"Ready: {entry['display_name']}", 100, 100)

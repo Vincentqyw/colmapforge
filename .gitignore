@@ -6,3 +6,5 @@
 .logo_preview/
 .logo_candidates/
 .ruff_cache/
+# Added by code-review-graph
+.code-review-graph/

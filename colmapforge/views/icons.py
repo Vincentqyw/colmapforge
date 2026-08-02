@@ -135,6 +135,37 @@ def _icon_info(color: str = "#8e8e93") -> QIcon:
     return _make_icon(20, draw, color)
 
 
+def _icon_stop(size: int = 14) -> QIcon:
+    """Filled rounded square — stop button."""
+    def draw(p: QPainter, s: int, c: QColor):
+        p.setBrush(QBrush(c))
+        m = s * 0.22
+        p.drawRoundedRect(int(m), int(m), int(s - 2 * m), int(s - 2 * m), 2, 2)
+    return _make_icon(size, draw, "#ff3b30")
+
+
+def _icon_colmap(size: int = 14) -> QIcon:
+    """2×2 grid glyph for the COLMAP launch button."""
+    def draw(p: QPainter, s: int, c: QColor):
+        p.setBrush(QBrush(c))
+        cell = s / 4.0
+        for i in range(2):
+            for j in range(2):
+                p.drawRoundedRect(int(cell * (1 + 2 * i)), int(cell * (1 + 2 * j)),
+                                  int(cell), int(cell), 1, 1)
+    return _make_icon(size, draw, "#5ac8fa")
+
+
+def _icon_clear(size: int = 14) -> QIcon:
+    """× glyph for clear buttons."""
+    def draw(p: QPainter, s: int, c: QColor):
+        p.setPen(QPen(c, 2.0, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        m = s * 0.25
+        p.drawLine(int(m), int(m), int(s - m), int(s - m))
+        p.drawLine(int(s - m), int(m), int(m), int(s - m))
+    return _make_icon(size, draw, "#ff3b30")
+
+
 def _icon_checkbox_unchecked(color: str = "#8e8e93") -> QIcon:
     """Empty rounded-rect box — unchecked state."""
     def draw(p: QPainter, s: int, c: QColor):

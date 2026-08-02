@@ -46,15 +46,15 @@ uv run colmapforge run -o out/ --video vid.mp4 --seg-model ...
 > CPU wheel — no extra setup needed. **Linux / Windows users with NVIDIA
 > GPUs** — use `uv sync --extra gpu` for CUDA acceleration.
 
-> **Zero-config models** — 16 SAM variants + SkyWater download from
-> HuggingFace on first use and cache to `~/.colmapforge/models/`.
+> **Zero-config models** — SAM3 + SkyWater download on first use and
+> cache to `~/.colmapforge/models/`.
 
 ## Workflow
 
 1. **Input** — Add video files and/or image folders
-2. **Frame Extraction** — Sample frames by interval, FPS, or time range
+2. **Frame Extraction** — Sample frames by interval or target FPS
 3. **Resize** — Downscale with max-dimension or fixed-factor modes
-4. **Segmentation** — SAM (text-prompt or grid-prompt) or SkyWater (fast sky/water/people)
+4. **Segmentation** — SAM3 (text prompts) or SkyWater (fast sky/water/people)
 5. **Camera** — Choose from 18 COLMAP camera models (SIMPLE_RADIAL default)
 6. **Build** — One-click `database.db` + masked images export
 
@@ -62,75 +62,24 @@ uv run colmapforge run -o out/ --video vid.mp4 --seg-model ...
 
 - **4-stage pipeline** — extraction → resize → masking → database, chained async via `QThreadPool`
 - **GUI + CLI** — full-featured desktop GUI or headless CLI for scripts/automation
-- **Zero-config models** — 16 SAM/SAM2/SAM3 + SkyWater auto-download on first run
-- **SAM1 / SAM2 / SAM3** — auto-detected from ONNX graph inputs; SAM3 supports text prompts
+- **Zero-config models** — SAM3 + SkyWater auto-download on first run
+- **SAM3** — class names go straight to its native language encoder as text prompts
 - **SkyWater** — SegFormer-B2 for fast sky/water/person segmentation (~48 MB)
-- **18 camera models** — SIMPLE_PINHOLE through EQUIRECTANGULAR, with prior focal length
+- **18 camera models** — SIMPLE_PINHOLE through EQUIRECTANGULAR
 - **GPU auto-detect** — CUDA → CoreML → CPU fallback; toolbar indicator shows active backend
 - **Dark / Light themes** — Apple HIG-inspired `QPalette` + QSS, toggle with Ctrl+T
 - **Preview panel** — real-time mask overlay with opacity control
 
 ## Available Models
 
-All models are ONNX-based and download on first use. The SAM variant (1/2/3)
-is auto-detected from the ONNX graph — you don't need to pick.
+All models are ONNX-based and download on first use
+(`colmapforge run --list-models` shows the same registry from the CLI).
 
-<details>
-<summary><b>SAM1</b> (7 models)</summary>
-
-| Model | Size |
-|-------|------|
-| MobileSAM | ~45 MB |
-| ViT-B | ~380 MB |
-| ViT-B (Quant) | ~190 MB |
-| ViT-L | ~1.2 GB |
-| ViT-L (Quant) | ~340 MB |
-| ViT-H | ~2.5 GB |
-| ViT-H (Quant) | ~670 MB |
-
-</details>
-
-<details>
-<summary><b>SAM2</b> (4 models)</summary>
-
-| Model | Size |
-|-------|------|
-| Hiera-Tiny | ~160 MB |
-| Hiera-Small | ~185 MB |
-| Hiera-Base+ | ~325 MB |
-| Hiera-Large | ~900 MB |
-
-</details>
-
-<details>
-<summary><b>SAM 2.1</b> (4 models)</summary>
-
-| Model | Size |
-|-------|------|
-| Hiera-Tiny | ~160 MB |
-| Hiera-Small | ~185 MB |
-| Hiera-Base+ | ~325 MB |
-| Hiera-Large | ~900 MB |
-
-</details>
-
-<details>
-<summary><b>SAM3</b> (1 model)</summary>
-
-| Model | Size |
-|-------|------|
-| SAM3 ViT-H | ~3.0 GB |
-
-</details>
-
-<details>
-<summary><b>SkyWater</b> (1 model — <a href="https://github.com/Vincentqyw/skywater_seg">SegFormer</a>)</summary>
-
-| Model | Size |
-|-------|------|
-| [SkyWater](https://github.com/Vincentqyw/skywater_seg) SegFormer-B2 | ~48 MB |
-
-</details>
+| Model | Type | Size |
+|-------|------|------|
+| [SkyWater](https://github.com/Vincentqyw/skywater_seg) SegFormer-B2 (FP16) | fixed sky/water/person | ~48 MB |
+| [SkyWater](https://github.com/Vincentqyw/skywater_seg) SegFormer-B2 (FP32) | fixed sky/water/person | ~95 MB |
+| SAM3 ViT-H | text prompts | ~3.0 GB |
 
 ## ONNX Runtime Backend
 
@@ -202,7 +151,6 @@ uv sync --extra gpu    # or --extra cpu
 - PyQt6 ≥ 6.6
 - OpenCV ≥ 4.8
 - ONNX Runtime ≥ 1.28 (see [above](#onnx-runtime-backend))
-- `huggingface_hub` ≥ 0.24 (for SkyWater download)
 - `tqdm` ≥ 4.66 (CLI progress bars)
 
 ## License

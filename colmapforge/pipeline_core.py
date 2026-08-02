@@ -13,13 +13,14 @@ from __future__ import annotations
 import logging
 import os
 import shutil
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
 import cv2
 import numpy as np
 
-from .camera_models import get_camera_model
+from .camera_models import DEFAULT_CAMERA_MODEL_ID, get_camera_model
 from .colmap_database import ColmapDatabase
 from .utils import (
     analyze_video,
@@ -36,8 +37,86 @@ ProgressCB = Callable[[int, str], None] | None
 ImageDoneCB = Callable[[str, str], None] | None
 CancelCheck = Callable[[], bool] | None
 
-# Long-side bound for SAM mask accumulation (same as workers.py).
+# Long-side bound for SAM3 inference.
 _SAM_MAX_INFER_DIM = 1024
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Configuration & shared conventions
+# ═══════════════════════════════════════════════════════════════════════
+
+@dataclass
+class PipelineConfig:
+    """All parameters needed to run the full preprocessor pipeline."""
+    video_paths: list[str] = field(default_factory=list)
+    image_paths: list[str] = field(default_factory=list)
+    output_dir: str = ""
+
+    extract_enabled: bool = True
+    extract_method: str = "interval"
+    extract_interval: int = 60
+    extract_target_fps: float = 2.0
+    extract_max_frames: int | None = None
+    extract_format: str = ".jpg"
+    extract_jpg_quality: int = 95
+
+    resize_enabled: bool = False
+    resize_mode: str = "downscale"
+    resize_max_dim: int = 2000
+    resize_factor: int = 4
+
+    seg_enabled: bool = False
+    seg_model_config: dict | None = None
+    seg_target_classes: list[str] = field(default_factory=list)
+    seg_confidence: float = 0.3
+
+    camera_model_id: int = DEFAULT_CAMERA_MODEL_ID
+    camera_params: list[float] = field(default_factory=list)
+
+    def resize_kwargs(self) -> dict:
+        """``extract_frames``/``apply_resize`` kwargs honoring ``resize_enabled``."""
+        mode = self.resize_mode if self.resize_enabled else ""
+        return {
+            "resize_mode": mode,
+            "resize_max_dim": self.resize_max_dim if mode == "max_dim" else 0,
+            "resize_factor": self.resize_factor if mode == "downscale" else 1,
+        }
+
+    def resize_signature(self):
+        """Hashable resize identity for change detection (None when disabled)."""
+        if not self.resize_enabled:
+            return None
+        if self.resize_mode == "max_dim":
+            return ("max_dim", self.resize_max_dim)
+        if self.resize_mode == "downscale":
+            return ("downscale", self.resize_factor)
+        return (self.resize_mode,)
+
+
+MASK_SUFFIX = "_mask.png"
+
+
+def output_layout(output_dir: str) -> tuple[str, str, str]:
+    """Canonical output layout: ``(images_dir, masks_dir, db_path)``."""
+    return (
+        os.path.join(output_dir, "images"),
+        os.path.join(output_dir, "masks"),
+        os.path.join(output_dir, "database.db"),
+    )
+
+
+def mask_path_for(image_path: str, mask_output_dir: str) -> str:
+    """Mask path convention shared by the mask writers and the preview reader."""
+    return os.path.join(mask_output_dir, f"{Path(image_path).stem}{MASK_SUFFIX}")
+
+
+def is_skywater_config(model_config: dict) -> bool:
+    """True when *model_config* refers to a SkyWater (SegFormer) model."""
+    return (
+        "skywater" in model_config.get("type", "").lower()
+        or "skywater" in model_config.get("name", "").lower()
+        or "skywater" in (model_config.get("model_path") or "").lower()
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -51,8 +130,6 @@ def extract_frames(
     method: str = "interval",
     interval: int = 60,
     target_fps: float = 2.0,
-    start_seconds: float = 0.0,
-    end_seconds: float | None = None,
     max_frames: int | None = None,
     resize_mode: str = "",
     resize_max_dim: int = 0,
@@ -82,7 +159,6 @@ def extract_frames(
         frames = compute_frame_indices(
             info["total_frames"], info["fps"],
             method=method, interval=interval, target_fps=target_fps,
-            start_seconds=start_seconds, end_seconds=end_seconds,
             max_frames=max_frames,
         )
 
@@ -180,8 +256,7 @@ def _predict_sam3_mask(
         else:
             embedding = model.update_language(embedding, cls_name)
         masks = model.predict_masks(
-            embedding, prompt=[],
-            confidence_threshold=confidence_threshold)
+            embedding, confidence_threshold=confidence_threshold)
         for m in masks:
             if m.ndim == 3 and m.shape[0] == 1:
                 m = m[0]
@@ -221,15 +296,6 @@ def run_sam_segmentation(
 
     model = _load_sam3_model(model_config)
 
-    # Validate on first image (systemic failure check)
-    try:
-        _predict_sam3_mask(model, image_paths[0], target_classes,
-                           confidence_threshold, cancel_check)
-    except Exception as e:
-        logger.exception("SAM3 validation failed on first image")
-        raise RuntimeError(
-            f"SAM3 failed on first image: {type(e).__name__}: {e}") from e
-
     failed = 0
     for idx, img_path in enumerate(image_paths):
         if cancel_check and cancel_check():
@@ -244,21 +310,26 @@ def run_sam_segmentation(
         try:
             mask = _predict_sam3_mask(
                 model, img_path, target_classes, confidence_threshold, cancel_check)
-            mp = os.path.join(mask_output_dir, f"{Path(img_path).stem}_mask.png")
-            cv2.imwrite(mp, mask)
-            mask_paths.append(mp)
-            if image_done_cb:
-                image_done_cb(img_path, mp)
         except Exception as e:
+            if idx == 0:
+                # A failure on the very first image means the setup itself is
+                # broken (model/providers) — abort instead of writing empty
+                # masks for the whole set.
+                logger.exception("SAM3 failed on first image")
+                raise RuntimeError(
+                    f"SAM3 failed on first image: {type(e).__name__}: {e}") from e
             failed += 1
             logger.warning("SAM3 failed for %s: %s", img_path, e)
             img = cv2.imread(img_path)
-            if img is not None:
-                mp = os.path.join(mask_output_dir, f"{Path(img_path).stem}_mask.png")
-                cv2.imwrite(mp, np.zeros(img.shape[:2], dtype=np.uint8))
-                mask_paths.append(mp)
-                if image_done_cb:
-                    image_done_cb(img_path, mp)
+            if img is None:
+                continue
+            mask = np.zeros(img.shape[:2], dtype=np.uint8)
+
+        mp = mask_path_for(img_path, mask_output_dir)
+        cv2.imwrite(mp, mask)
+        mask_paths.append(mp)
+        if image_done_cb:
+            image_done_cb(img_path, mp)
 
     if progress_cb:
         progress_cb(100,
@@ -347,7 +418,7 @@ def run_skywater_segmentation(
         for cid in target_ids:
             final[mask_full == cid] = 255
 
-        mp = os.path.join(mask_output_dir, f"{Path(img_path).stem}_mask.png")
+        mp = mask_path_for(img_path, mask_output_dir)
         cv2.imwrite(mp, final)
         mask_paths.append(mp)
         if image_done_cb:
@@ -374,18 +445,12 @@ def run_segmentation(
     cancel_check: CancelCheck = None,
 ) -> list[str]:
     """Dispatch to SAM3 or SkyWater based on *model_config*."""
-    model_path = model_config.get("model_path", "")
-
-    is_skywater = (
-        "skywater" in model_config.get("type", "").lower()
-        or "skywater" in model_config.get("name", "").lower()
-        or "skywater" in model_path.lower()
-    )
+    is_skywater = is_skywater_config(model_config)
+    model_path = model_config.get("model_path") or ""
 
     # Auto-download if needed
     from .model_downloader import download_model_entry
     logical_name = model_config.get("logical_name", "")
-    need_download = False
     if is_skywater:
         need_download = not model_path or not os.path.isfile(model_path)
     else:
@@ -406,6 +471,10 @@ def run_segmentation(
 
         updated = download_model_entry(logical_name, progress_callback=_dl_progress)
         model_config.update(updated)
+
+    if cancel_check and cancel_check():
+        logger.info("Segmentation cancelled")
+        return []
 
     if is_skywater:
         mp = model_config.get("model_path") or model_config.get("decoder_model_path")
@@ -430,9 +499,8 @@ def run_segmentation(
 def build_database(
     image_dir: str,
     db_path: str,
-    camera_model_id: int = 2,
+    camera_model_id: int = DEFAULT_CAMERA_MODEL_ID,
     camera_params: list[float] | None = None,
-    prior_focal_length: int = 0,
     *,
     progress_cb: ProgressCB = None,
 ) -> str:
@@ -458,7 +526,7 @@ def build_database(
     db = ColmapDatabase(db_path)
     db.reset()
     with db:
-        result = db.build_project(image_dir, model, camera_params, prior_focal_length)
+        result = db.build_project(image_dir, model, camera_params)
 
     if progress_cb:
         progress_cb(100, f"Ready: {result['image_count']} images, {model.name}")

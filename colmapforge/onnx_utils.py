@@ -62,11 +62,6 @@ _OVERWRITE_FIX = (
 
 # ── Public API ────────────────────────────────────────────────────────
 
-def is_available() -> bool:
-    """Return ``True`` if the ``onnxruntime`` module can be imported."""
-    return _ONNXRUNTIME_AVAILABLE
-
-
 def require_onnxruntime() -> None:
     """Raise a :class:`RuntimeError` with install hint if onnxruntime is missing."""
     if not _ONNXRUNTIME_AVAILABLE:

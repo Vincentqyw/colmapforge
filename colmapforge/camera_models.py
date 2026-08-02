@@ -1,7 +1,8 @@
 """
-Complete COLMAP camera model definitions — all 16 models (IDs 0–15).
+Complete COLMAP camera model definitions — 18 models (IDs 0–17).
 
 Based on: https://github.com/colmap/colmap/blob/main/src/colmap/sensor/models.h
+(models 0–15), plus EUCM and EQUIRECTANGULAR.
 """
 
 from __future__ import annotations
@@ -40,7 +41,7 @@ class CameraModel:
 
 
 # ---------------------------------------------------------------------------
-# Complete registry — 16 models
+# Complete registry
 # ---------------------------------------------------------------------------
 CAMERA_MODELS: dict[int, CameraModel] = {
     0: CameraModel(0, "SIMPLE_PINHOLE", ["f", "cx", "cy"],
@@ -91,12 +92,11 @@ CAMERA_MODEL_BY_NAME = {m.name: m for m in CAMERA_MODELS.values()}
 PINHOLE_MODELS = [m for m in CAMERA_MODELS.values() if not m.is_fisheye]
 FISHEYE_MODELS = [m for m in CAMERA_MODELS.values() if m.is_fisheye]
 
+# Default across GUI, CLI, and pipeline: SIMPLE_RADIAL.
+DEFAULT_CAMERA_MODEL_ID = 2
+
 
 def get_camera_model(model_id: int) -> CameraModel:
     if model_id not in CAMERA_MODELS:
         raise KeyError(f"Unknown camera model ID: {model_id}")
     return CAMERA_MODELS[model_id]
-
-
-def list_camera_models() -> list[CameraModel]:
-    return [CAMERA_MODELS[i] for i in sorted(CAMERA_MODELS)]

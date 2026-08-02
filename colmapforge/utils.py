@@ -23,10 +23,6 @@ IMAGE_EXTENSIONS = {
 }
 
 
-def is_video_file(path: str | Path) -> bool:
-    return Path(path).suffix.lower() in VIDEO_EXTENSIONS
-
-
 def is_image_file(path: str | Path) -> bool:
     return Path(path).suffix.lower() in IMAGE_EXTENSIONS
 
@@ -135,19 +131,12 @@ def resize_image(
 def compute_frame_indices(
     total_frames: int, fps: float,
     method: str = "interval", interval: int = 1,
-    target_fps: float = 1.0, start_seconds: float = 0.0,
-    end_seconds: float | None = None, max_frames: int | None = None,
+    target_fps: float = 1.0, max_frames: int | None = None,
 ) -> list[int]:
     """Compute which 0-based frame indices to extract from a video."""
     if method == "target_fps":
         interval = max(1, int(fps / target_fps))
-        frames = list(range(0, total_frames, interval))
-    elif method == "time_range":
-        start_frame = max(0, int(start_seconds * fps))
-        end_frame = total_frames if end_seconds is None else min(total_frames, int(end_seconds * fps))
-        frames = list(range(start_frame, end_frame, max(1, interval)))
-    else:
-        frames = list(range(0, total_frames, max(1, interval)))
+    frames = list(range(0, total_frames, max(1, interval)))
 
     if max_frames and max_frames > 0 and len(frames) > max_frames:
         step = len(frames) / max_frames
@@ -155,10 +144,12 @@ def compute_frame_indices(
     return frames
 
 
-def get_output_image_path(
-    output_dir: str, original_path: str,
-    index: int | None = None, extension: str = ".jpg",
-) -> str:
-    base = Path(original_path).stem
-    name = f"{base}_frame_{index:06d}{extension}" if index is not None else f"{base}{extension}"
-    return os.path.join(output_dir, name)
+def colmap_gui_command(db_path: str, images_dir: str, masks_dir: str | None = None) -> list[str]:
+    """Build the ``colmap gui`` argv for a built database.
+
+    ``--ImageReader.mask_path`` is included only when *masks_dir* exists.
+    """
+    cmd = ["colmap", "gui", "--database_path", db_path, "--image_path", images_dir]
+    if masks_dir and os.path.isdir(masks_dir):
+        cmd += ["--ImageReader.mask_path", masks_dir]
+    return cmd

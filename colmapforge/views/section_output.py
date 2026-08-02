@@ -7,52 +7,13 @@ Browses for output directory, shows progress, and triggers the pipeline.
 from __future__ import annotations
 
 from PyQt6.QtCore import QSize, pyqtSignal
-from PyQt6.QtGui import QPainter, QColor, QPixmap, QIcon, QBrush
-from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import (
     QHBoxLayout, QLabel, QProgressBar, QPushButton, QVBoxLayout, QWidget,
 )
 
-from .icons import _icon_check, _icon_folder
+from .icons import _icon_check, _icon_colmap, _icon_folder, _icon_stop
 from .widgets import _label, _section_card, _section_header
-
-
-def _icon_stop(size: int = 16) -> QIcon:
-    """Filled square icon for the stop button."""
-    app = __import__("PyQt6.QtWidgets", fromlist=["QApplication"]).QApplication.instance()
-    dpr = app.devicePixelRatio() if app else 1.0
-    if dpr < 1.0: dpr = 1.0
-    phys = max(1, int(size * dpr))
-    pm = QPixmap(phys, phys); pm.setDevicePixelRatio(dpr)
-    pm.fill(Qt.GlobalColor.transparent)
-    p = QPainter(pm); p.setRenderHint(QPainter.RenderHint.Antialiasing)
-    p.setPen(Qt.PenStyle.NoPen)
-    p.setBrush(QBrush(QColor("#ff3b30")))
-    m = size * 0.22
-    p.drawRoundedRect(int(m), int(m), int(size - 2 * m), int(size - 2 * m), 2, 2)
-    p.end()
-    return QIcon(pm)
-
-
-def _icon_colmap(size: int = 14) -> QIcon:
-    """Simple grid glyph for the COLMAP launch button."""
-    app = __import__("PyQt6.QtWidgets", fromlist=["QApplication"]).QApplication.instance()
-    dpr = app.devicePixelRatio() if app else 1.0
-    if dpr < 1.0: dpr = 1.0
-    phys = max(1, int(size * dpr))
-    pm = QPixmap(phys, phys); pm.setDevicePixelRatio(dpr)
-    pm.fill(Qt.GlobalColor.transparent)
-    p = QPainter(pm); p.setRenderHint(QPainter.RenderHint.Antialiasing)
-    p.setPen(Qt.PenStyle.NoPen)
-    p.setBrush(QBrush(QColor("#5ac8fa")))
-    cell = size / 4.0
-    for i in range(2):
-        for j in range(2):
-            x = int(cell * (1 + 2 * i))
-            y = int(cell * (1 + 2 * j))
-            p.drawRoundedRect(x, y, int(cell), int(cell), 1, 1)
-    p.end()
-    return QIcon(pm)
 
 
 class OutputSection(QWidget):
@@ -132,14 +93,18 @@ class OutputSection(QWidget):
         else:
             self.run_clicked.emit()
 
+    def _set_run_button(self, running: bool, icon: QIcon | None = None) -> None:
+        """Style the Build/Stop toggle button; re-polish so QSS follows."""
+        self.btn_run.setEnabled(True)
+        self.btn_run.setText("Stop" if running else "Build COLMAP Database")
+        self.btn_run.setObjectName("btnStop" if running else "btnRun")
+        self.btn_run.setIcon(icon if icon is not None else QIcon())
+        self.btn_run.style().unpolish(self.btn_run)
+        self.btn_run.style().polish(self.btn_run)
+
     # ── public API ──
 
-    @property
-    def output_dir(self) -> str:
-        return self._output_dir
-
     def set_output_dir(self, path: str) -> None:
-        self._output_dir = path
         self._path_label.setText(path)
         import os
         self.btn_open_output.setEnabled(os.path.isdir(path))
@@ -159,13 +124,7 @@ class OutputSection(QWidget):
         self._db_path = db_path; self._images_dir = images_dir
         self.progress.setValue(100); self.progress.setVisible(False)
         self.progress.setFormat("%p%")  # reset format
-        self.btn_run.setEnabled(True)
-        self.btn_run.setText("Build COLMAP Database")
-        self.btn_run.setObjectName("btnRun")
-        self.btn_run.setIcon(_icon_check())
-        # Re-polish so QSS picks up the new objectName
-        self.btn_run.style().unpolish(self.btn_run)
-        self.btn_run.style().polish(self.btn_run)
+        self._set_run_button(running=False, icon=_icon_check())
         self.btn_launch_colmap.setEnabled(True)
         self.btn_open_output.setEnabled(True)
         self.lbl_result.setText(f"Database ready\n{db_path}")
@@ -175,40 +134,22 @@ class OutputSection(QWidget):
         self._is_running = busy
         if busy:
             self.progress.setVisible(True); self.progress.setValue(0)
-            self.btn_run.setEnabled(True)          # keep enabled so user can click Stop
-            self.btn_run.setText("Stop")
-            self.btn_run.setObjectName("btnStop")
-            self.btn_run.setIcon(_icon_stop(14))
-            self.btn_run.style().unpolish(self.btn_run)
-            self.btn_run.style().polish(self.btn_run)
+            # keep the button enabled so the user can click Stop
+            self._set_run_button(running=True, icon=_icon_stop(14))
             self.btn_launch_colmap.setEnabled(False)
             self.lbl_result.setVisible(False)
         else:
-            self._is_running = False
-            self.btn_run.setEnabled(True)
-            self.btn_run.setText("Build COLMAP Database")
-            self.btn_run.setObjectName("btnRun")
-            self.btn_run.setIcon(QIcon())          # clear icon
-            self.btn_run.style().unpolish(self.btn_run)
-            self.btn_run.style().polish(self.btn_run)
+            self._set_run_button(running=False)
 
     @property
     def launch_colmap(self) -> bool:
         return self.chk_launch_colmap.isChecked()
 
-    def set_open_enabled(self, enabled: bool) -> None:
-        self.btn_open_output.setEnabled(enabled)
-
     def reset(self) -> None:
         self._is_running = False
         self.progress.setVisible(False)
         self.progress.setFormat("%p%")  # reset format
-        self.btn_run.setEnabled(True)
-        self.btn_run.setText("Build COLMAP Database")
-        self.btn_run.setObjectName("btnRun")
-        self.btn_run.setIcon(QIcon())
-        self.btn_run.style().unpolish(self.btn_run)
-        self.btn_run.style().polish(self.btn_run)
+        self._set_run_button(running=False)
         self.btn_launch_colmap.setEnabled(False)
         self.btn_open_output.setEnabled(False)
         self.lbl_result.setVisible(False)
