@@ -94,10 +94,41 @@ def main(argv: list[str] | None = None) -> int:
         return run_download(argv[1:])
 
     # ── GUI mode ──
-    parser = argparse.ArgumentParser(prog="colmapforge",
-                                     description="COLMAP Forge")
+    parser = argparse.ArgumentParser(
+        prog="colmapforge",
+        usage=(
+            "colmapforge [--log-level LEVEL]     launch the desktop GUI\n"
+            "       colmapforge run [options]          run the pipeline headlessly\n"
+            "       colmapforge download [options]     pre-download models"
+        ),
+        description=(
+            "COLMAP Forge — prepare video/image data for COLMAP Structure-from-"
+            "Motion: frame extraction, resize, dynamic-object masking (SkyWater / "
+            "YOLO-World + SAM text prompts / SAM3), and database.db export."
+        ),
+        epilog=(
+            "commands:\n"
+            "  (none)      Launch the desktop GUI\n"
+            "  run         Headless pipeline: video/images → frames → resize →\n"
+            "              segmentation masks → COLMAP database.db\n"
+            "  download    Pre-download segmentation models (SHA256-verified;\n"
+            "              already-downloaded models are skipped)\n"
+            "\n"
+            "examples:\n"
+            "  colmapforge                                # GUI\n"
+            "  colmapforge run -o out/ --video vid.mp4 \\\n"
+            "      --seg-model yoloworld_efficientvit_sam --seg-classes person car\n"
+            "  colmapforge run --list-models              # show available models\n"
+            "  colmapforge download --all                 # fetch every model\n"
+            "\n"
+            "  colmapforge run --help                     # all pipeline options\n"
+            "  colmapforge download --help                # all download options"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument("--log-level", default="INFO",
-                        choices=["DEBUG", "INFO", "WARNING", "ERROR"])
+                        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+                        help="GUI logging level (default: INFO)")
     args = parser.parse_args(argv)
     return _launch_gui(args.log_level)
 

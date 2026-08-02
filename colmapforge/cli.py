@@ -28,6 +28,7 @@ from .pipeline_core import (
     run_segmentation,
 )
 from .utils import collect_image_files, colmap_gui_command
+from .views.constants import DEFAULT_PRESET, QUICK_PRESETS
 
 logger = logging.getLogger(__name__)
 
@@ -94,9 +95,12 @@ def build_parser() -> argparse.ArgumentParser:
                          help="Skip segmentation step")
     grp_seg.add_argument("--seg-model", default=None, metavar="NAME",
                          help="Model name from registry (e.g. skywater_segformer_b2_fp16, "
-                              "yoloworld_mobile_sam, sam3_vit_h_20260220)")
-    grp_seg.add_argument("--seg-classes", nargs="+", default=[], metavar="CLASS",
-                         help="Target classes to mask (e.g. sky water person)")
+                              "yoloworld_mobile_sam, sam3_vit_h_20260220). "
+                              "Default: the first registry model (SkyWater)")
+    grp_seg.add_argument("--seg-classes", nargs="+", default=None, metavar="CLASS",
+                         help="Target classes to mask (e.g. sky water person). "
+                              f"Default: the '{DEFAULT_PRESET}' preset "
+                              f"({', '.join(QUICK_PRESETS[DEFAULT_PRESET][:4])}, …)")
     grp_seg.add_argument("--seg-confidence", type=float, default=None, metavar="F",
                          help="Confidence threshold 0.0–1.0: SAM3 mask score or "
                               "YOLO-World box score (default: model-specific — "
@@ -127,6 +131,9 @@ def build_parser() -> argparse.ArgumentParser:
 def _epilog() -> str:
     return (
         "Examples:\n"
+        "  # Minimal: video → frames → default segmentation (SkyWater,\n"
+        "  # 'All Dynamics' classes) → DB\n"
+        "  colmapforge run -o out/ --video vid.mp4\n\n"
         "  # Full pipeline: video → frames → resize → SkyWater segmentation → DB\n"
         "  colmapforge run -o out/ --video vid.mp4 "
         "--resize-mode max_dim --resize-max-dim 2000 "
@@ -516,15 +523,22 @@ def run_cli(argv: list[str] | None = None) -> int:
     seg_enabled = not args.no_seg
     model_config = None
     if seg_enabled:
-        try:
-            model_config = resolve_model_config(args.seg_model, seg_enabled=True)
-        except ValueError as e:
-            parser.error(str(e))
-        if model_config is None:
-            parser.error(
-                "Segmentation is enabled but no --seg-model specified.\n"
-                "Use --seg-model to pick a model, or --no-seg to skip segmentation."
-            )
+        if args.seg_model is None:
+            # Default to the registry's first model — same as the GUI dropdown.
+            models = discover_models()
+            if not models:
+                parser.error("No models found in the registry; use --no-seg.")
+            model_config = models[0]
+            logger.info("No --seg-model given — defaulting to %s",
+                        model_config.get("display_name", model_config.get("name", "?")))
+        else:
+            try:
+                model_config = resolve_model_config(args.seg_model, seg_enabled=True)
+            except ValueError as e:
+                parser.error(str(e))
+
+    seg_classes = list(args.seg_classes) if args.seg_classes \
+        else list(QUICK_PRESETS[DEFAULT_PRESET])
 
     config = PipelineConfig(
         video_paths=list(args.video),
@@ -546,7 +560,7 @@ def run_cli(argv: list[str] | None = None) -> int:
 
         seg_enabled=seg_enabled,
         seg_model_config=model_config,
-        seg_target_classes=list(args.seg_classes),
+        seg_target_classes=seg_classes,
         # No explicit threshold → the model's calibrated default (0.3 unless
         # the registry entry says otherwise, e.g. YOLO-World's 0.1).
         seg_confidence=args.seg_confidence if args.seg_confidence is not None
