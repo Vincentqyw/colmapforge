@@ -93,11 +93,14 @@ def build_parser() -> argparse.ArgumentParser:
     grp_seg.add_argument("--no-seg", action="store_true",
                          help="Skip segmentation step")
     grp_seg.add_argument("--seg-model", default=None, metavar="NAME",
-                         help="Model name from registry (e.g. skywater_segformer_b2_fp16, sam3_vit_h_20260220)")
+                         help="Model name from registry (e.g. skywater_segformer_b2_fp16, "
+                              "yoloworld_mobile_sam, sam3_vit_h_20260220)")
     grp_seg.add_argument("--seg-classes", nargs="+", default=[], metavar="CLASS",
                          help="Target classes to mask (e.g. sky water person)")
-    grp_seg.add_argument("--seg-confidence", type=float, default=0.3, metavar="F",
-                         help="SAM3 confidence threshold 0.0–1.0 (default: 0.3)")
+    grp_seg.add_argument("--seg-confidence", type=float, default=None, metavar="F",
+                         help="Confidence threshold 0.0–1.0: SAM3 mask score or "
+                              "YOLO-World box score (default: model-specific — "
+                              "0.3 for SAM3, 0.1 for YOLO-World cascades)")
     grp_seg.add_argument("--list-models", action="store_true",
                          help="List available segmentation models and exit")
 
@@ -134,6 +137,9 @@ def _epilog() -> str:
         "  colmapforge run -o out/ --video vid.mp4 "
         "--seg-model sam3_vit_h_20260220 --seg-classes person car "
         "--seg-confidence 0.4\n\n"
+        "  # YOLO-World + SAM cascade (text prompts, faster than SAM3)\n"
+        "  colmapforge run -o out/ --video vid.mp4 "
+        "--seg-model yoloworld_mobile_sam --seg-classes person car\n\n"
         "  # List available models / cameras\n"
         "  colmapforge run --list-models\n"
         "  colmapforge run --list-cameras\n\n"
@@ -470,7 +476,10 @@ def run_cli(argv: list[str] | None = None) -> int:
         seg_enabled=seg_enabled,
         seg_model_config=model_config,
         seg_target_classes=list(args.seg_classes),
-        seg_confidence=args.seg_confidence,
+        # No explicit threshold → the model's calibrated default (0.3 unless
+        # the registry entry says otherwise, e.g. YOLO-World's 0.1).
+        seg_confidence=args.seg_confidence if args.seg_confidence is not None
+        else (model_config or {}).get("default_confidence", 0.3),
 
         camera_model_id=camera_id,
         camera_params=list(args.camera_params) if args.camera_params else [],

@@ -39,7 +39,7 @@ class SegmentationSection(QWidget):
         self.cmb_sam_model.currentIndexChanged.connect(self._on_model_changed)
         _grid_row(grid, row, "Model", self.cmb_sam_model); row += 1
 
-        self.spin_conf = _dspin(0.1, 1.0, 0.3, 0.05, 2)
+        self.spin_conf = _dspin(0.01, 1.0, 0.3, 0.05, 2)
         _grid_row(grid, row, "Confidence", self.spin_conf); row += 1
 
         self.cmb_presets = _combo(*QUICK_PRESETS.keys())
@@ -132,7 +132,11 @@ class SegmentationSection(QWidget):
         self.cmb_sam_model.clear()
         for cfg in configs:
             label = cfg.get("display_name", cfg.get("name", ""))
-            has_text = " [TEXT]" if cfg.get("language_encoder_path") else ""
+            supports_text = (
+                cfg.get("language_encoder_path")           # SAM3
+                or cfg.get("type") == "yoloworld_sam"      # YOLO-World cascade
+            )
+            has_text = " [TEXT]" if supports_text else ""
             self.cmb_sam_model.addItem(f"{label}{has_text}", cfg)
 
     def apply_preset(self) -> None:
@@ -147,6 +151,10 @@ class SegmentationSection(QWidget):
 
     def _on_model_changed(self) -> None:
         """When the model combo changes, update custom class hint."""
+        cfg = self.cmb_sam_model.currentData() or {}
+        # Models with calibrated thresholds (e.g. YOLO-World's low absolute
+        # scores) bring their own default; others get the standard 0.3.
+        self.spin_conf.setValue(cfg.get("default_confidence", 0.3))
         if self._is_skywater_model():
             self.lbl_custom_hint.setText(
                 "SkyWater: custom classes not supported (fixed: sky, water, person)")

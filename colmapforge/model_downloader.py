@@ -1,4 +1,5 @@
-"""Model discovery and download — SAM (zip) + SkyWater (single ONNX file).
+"""Model discovery and download — SAM (zip), SkyWater (single ONNX file),
+and YOLO-World + SAM cascades (composed from hidden component entries).
 
 On first launch, scans the built-in ``models.yaml`` registry and creates
 stub config.yaml files under ``~/.colmapforge/models/<name>/`` for
@@ -266,6 +267,96 @@ def _skywater_config(entry: dict, model_path: str | None) -> dict:
     }
 
 
+def _single_file_config(entry: dict, local_path: str) -> dict:
+    """Config for a downloaded single-file model of any type."""
+    if entry.get("type") == "skywater":
+        return _skywater_config(entry, local_path)
+    return {
+        "type": entry.get("type", ""),
+        "name": entry["name"],
+        "display_name": entry.get("display_name", entry["name"]),
+        "model_path": local_path,
+        "logical_name": entry["name"],
+        "has_downloaded": True,
+    }
+
+
+# Component type → sam_backend key consumed by pipeline_core._load_box_sam_model.
+_SAM_BACKEND_BY_TYPE = {"efficientvit_sam": "efficientvit", "edgetam": "edgetam"}
+
+
+def _multifile_paths(entry: dict) -> dict[str, str]:
+    """basename → local path for a multi-file (``files:``) component entry."""
+    model_dir = os.path.join(MODELS_ROOT, entry["name"])
+    return {os.path.basename(u): os.path.join(model_dir, os.path.basename(u))
+            for u in entry["files"]}
+
+
+def _component_local_config(comp_entry: dict) -> dict | None:
+    """Local (already-downloaded) paths for one cascade component, else None."""
+    model_dir = os.path.join(MODELS_ROOT, comp_entry["name"])
+    if comp_entry.get("files"):
+        # Multi-file entry (encoder + decoder, possibly external .onnx_data).
+        paths = _multifile_paths(comp_entry)
+        if all(os.path.isfile(p) for p in paths.values()):
+            return {
+                "encoder_model_path": paths[comp_entry["encoder_filename"]],
+                "decoder_model_path": paths[comp_entry["decoder_filename"]],
+            }
+        return None
+    if _is_zip_entry(comp_entry):
+        return _cached_sam_config(comp_entry, model_dir)
+    filename = comp_entry.get("filename") or os.path.basename(comp_entry["download_url"])
+    local = os.path.join(model_dir, filename)
+    return {"model_path": local} if os.path.isfile(local) else None
+
+
+def _cascade_config(entry: dict) -> dict:
+    """Build a YOLO-World + SAM cascade config by resolving its components.
+
+    Each component is a normal (hidden) registry entry; the cascade merges
+    their local paths. ``has_downloaded`` is True only when every component
+    is already on disk.
+    """
+    merged: dict = {
+        "type": "yoloworld_sam",
+        "name": entry["name"],
+        "logical_name": entry["name"],
+        "size_hint_mb": entry.get("size_hint_mb", 0),
+    }
+    if "default_confidence" in entry:
+        merged["default_confidence"] = entry["default_confidence"]
+    downloaded = True
+    for comp_name in entry.get("components", []):
+        comp = _resolve_entry(comp_name)
+        if comp is None:
+            logger.warning("Cascade %s: unknown component %s", entry["name"], comp_name)
+            downloaded = False
+            continue
+        local = _component_local_config(comp)
+        if local is None:
+            downloaded = False
+            continue
+        ctype = comp.get("type", "")
+        if ctype == "yoloworld":
+            merged["yoloworld_model_path"] = local["model_path"]
+        elif ctype == "text_encoder":
+            merged["text_encoder_path"] = local["model_path"]
+        elif ctype == "segment_anything" or ctype in _SAM_BACKEND_BY_TYPE:
+            merged["encoder_model_path"] = local.get("encoder_model_path", "")
+            merged["decoder_model_path"] = local.get("decoder_model_path", "")
+            if ctype in _SAM_BACKEND_BY_TYPE:
+                merged["sam_backend"] = _SAM_BACKEND_BY_TYPE[ctype]
+
+    size_tag = ""
+    if not downloaded:
+        size = entry.get("size_hint_mb", 0)
+        size_tag = f" [Download ~{size} MB]" if size else " [Download]"
+    merged["display_name"] = entry.get("display_name", entry["name"]) + size_tag
+    merged["has_downloaded"] = downloaded
+    return merged
+
+
 def discover_models() -> list[dict]:
     """Discover all available models (SkyWater + SAM3) from the registry.
 
@@ -282,10 +373,15 @@ def discover_models() -> list[dict]:
     configs: list[dict] = []
 
     for entry in _load_sam_registry():
+        if entry.get("hidden"):
+            continue  # cascade components — not directly selectable
         name = entry["name"]
         model_dir = os.path.join(MODELS_ROOT, name)
 
-        if _is_zip_entry(entry):
+        if entry.get("type") == "yoloworld_sam":
+            # Cascade: composed from hidden component entries.
+            configs.append(_cascade_config(entry))
+        elif _is_zip_entry(entry):
             # SAM3: zip → downloaded when ONNX files exist on disk.
             cached = _cached_sam_config(entry, model_dir)
             configs.append(cached if cached else _build_stub_config(entry, model_dir))
@@ -418,6 +514,33 @@ def download_model_entry(
     entry = _resolve_entry(logical_name)
     if entry is None:
         raise ValueError(f"Unknown model: {logical_name}")
+
+    if entry.get("type") == "yoloworld_sam":
+        # Cascade: download every component, then merge their paths.
+        for comp_name in entry.get("components", []):
+            download_model_entry(comp_name, progress_callback=progress_callback)
+        cfg = _cascade_config(entry)
+        if progress_callback:
+            progress_callback(f"Ready: {entry.get('display_name', logical_name)}", 100, 100)
+        return cfg
+
+    if entry.get("files"):
+        # Multi-file component (encoder + decoder, possibly external data).
+        display = entry.get("display_name", logical_name)
+        for url, dest in zip(entry["files"], _multifile_paths(entry).values()):
+            if os.path.isfile(dest):
+                continue
+            _download_file(url, dest, f"{display} ({os.path.basename(dest)})",
+                           entry.get("size_hint_mb", 0), progress_callback)
+        return {
+            "type": entry.get("type", ""),
+            "name": entry["name"],
+            "display_name": display,
+            "logical_name": entry["name"],
+            "has_downloaded": True,
+            **(_component_local_config(entry) or {}),
+        }
+
     if not entry.get("download_url"):
         raise ValueError(f"No download_url for model: {logical_name}")
 
@@ -443,4 +566,4 @@ def download_model_entry(
             _download_single(entry, model_dir, progress_callback)
             if progress_callback:
                 progress_callback(f"Ready: {entry['display_name']}", 100, 100)
-        return _skywater_config(entry, local)
+        return _single_file_config(entry, local)

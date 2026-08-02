@@ -119,6 +119,11 @@ def is_skywater_config(model_config: dict) -> bool:
     )
 
 
+def is_yoloworld_sam_config(model_config: dict) -> bool:
+    """True when *model_config* refers to a YOLO-World + SAM1/2 cascade."""
+    return model_config.get("type", "") == "yoloworld_sam"
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # Frame Extraction
 # ═══════════════════════════════════════════════════════════════════════
@@ -339,6 +344,163 @@ def run_sam_segmentation(
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# Segmentation — YOLO-World + SAM1/2 cascade
+# ═══════════════════════════════════════════════════════════════════════
+
+def _load_box_sam_model(model_config: dict):
+    """Build a box-promptable SAM from *model_config*.
+
+    EfficientViT-SAM is declared explicitly (``sam_backend`` key from the
+    registry); SAM1 vs SAM2 is auto-detected from the decoder's ONNX graph
+    inputs (SAM2 decoders take ``high_res_feats_0``; SAM1 decoders do not).
+    """
+    dp = model_config["decoder_model_path"]
+
+    if model_config.get("sam_backend") == "efficientvit":
+        from .sam_backends.efficientvit_sam_onnx import EfficientViTSAMONNX
+        return EfficientViTSAMONNX(
+            encoder_model_path=model_config["encoder_model_path"],
+            decoder_model_path=dp)
+    if model_config.get("sam_backend") == "edgetam":
+        from .sam_backends.edgetam_onnx import EdgeTAMONNX
+        return EdgeTAMONNX(
+            encoder_model_path=model_config["encoder_model_path"],
+            decoder_model_path=dp)
+
+    import onnx
+
+    inputs = {i.name for i in onnx.load(dp).graph.input}
+    if "high_res_feats_0" in inputs:
+        from .sam_backends.sam2_onnx import SegmentAnything2ONNX
+        return SegmentAnything2ONNX(
+            encoder_model_path=model_config["encoder_model_path"],
+            decoder_model_path=dp)
+    from .sam_backends.sam_onnx import SegmentAnythingONNX
+    return SegmentAnythingONNX(
+        encoder_model_path=model_config["encoder_model_path"],
+        decoder_model_path=dp)
+
+
+def _predict_yoloworld_sam_mask(
+    detector, sam, img_path: str, target_classes: list[str],
+    confidence_threshold: float, cancel_check: CancelCheck,
+) -> np.ndarray:
+    """Detect *target_classes* with YOLO-World, mask each box with SAM,
+    and return the combined uint8 mask."""
+    img = cv2.imread(img_path)
+    if img is None:
+        raise RuntimeError(f"Cannot read: {img_path}")
+    h, w = img.shape[:2]
+    combined = np.zeros((h, w), dtype=np.uint8)
+
+    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    detections = detector.detect(
+        img_rgb, target_classes, score_threshold=confidence_threshold)
+    if not detections:
+        return combined
+
+    boxes = [
+        [float(v) for v in box] for box, _cls, _score in detections
+        if box[2] - box[0] >= 1 and box[3] - box[1] >= 1
+    ]
+    if not boxes:
+        return combined
+
+    embedding = sam.encode(img)  # per-image; the decoder runs per box
+    if hasattr(sam, "predict_boxes"):
+        # Batched fast path (EfficientViT-SAM): one decoder call for all boxes.
+        for m in sam.predict_boxes(embedding, boxes):
+            combined = np.maximum(combined, (m > 0).astype(np.uint8) * 255)
+    else:
+        for box in boxes:
+            if cancel_check and cancel_check():
+                break
+            masks = np.asarray(sam.predict_masks(
+                embedding, [{"type": "rectangle", "data": box}]))
+            for m in masks.reshape(-1, *masks.shape[-2:]):
+                combined = np.maximum(combined, (m > 0).astype(np.uint8) * 255)
+
+    logger.debug("YOLO-World+SAM %s: %d boxes, mask %.1f%% non-zero",
+                 Path(img_path).name, len(detections),
+                 100 * np.count_nonzero(combined) / combined.size)
+    return combined
+
+
+def run_yoloworld_sam_segmentation(
+    image_paths: list[str],
+    mask_output_dir: str,
+    model_config: dict,
+    target_classes: list[str],
+    confidence_threshold: float = 0.3,
+    *,
+    progress_cb: ProgressCB = None,
+    image_done_cb: ImageDoneCB = None,
+    cancel_check: CancelCheck = None,
+) -> list[str]:
+    """Run the YOLO-World → SAM1/2 cascade on *image_paths*.
+
+    Class names drive YOLO-World's open-vocabulary detector; each detected
+    box prompts SAM for a mask, and the per-image union is written to
+    *mask_output_dir*. Returns the list of mask paths.
+    """
+    from .sam_backends.yoloworld_onnx import YoloWorldONNX
+
+    os.makedirs(mask_output_dir, exist_ok=True)
+    mask_paths: list[str] = []
+    total = len(image_paths)
+
+    if total == 0:
+        return mask_paths
+
+    detector = YoloWorldONNX(
+        model_config["yoloworld_model_path"], model_config["text_encoder_path"])
+    sam = _load_box_sam_model(model_config)
+
+    failed = 0
+    for idx, img_path in enumerate(image_paths):
+        if cancel_check and cancel_check():
+            logger.info("YOLO-World+SAM segmentation cancelled")
+            return mask_paths
+
+        pct = int(idx / total * 100)
+        name = Path(img_path).name
+        if progress_cb:
+            progress_cb(pct, f"YOLO-World+SAM: {name} ({idx + 1}/{total})")
+
+        try:
+            mask = _predict_yoloworld_sam_mask(
+                detector, sam, img_path, target_classes,
+                confidence_threshold, cancel_check)
+        except Exception as e:
+            if idx == 0:
+                # A failure on the very first image means the setup itself is
+                # broken (model/providers) — abort instead of writing empty
+                # masks for the whole set.
+                logger.exception("YOLO-World+SAM failed on first image")
+                raise RuntimeError(
+                    f"YOLO-World+SAM failed on first image: "
+                    f"{type(e).__name__}: {e}") from e
+            failed += 1
+            logger.warning("YOLO-World+SAM failed for %s: %s", img_path, e)
+            img = cv2.imread(img_path)
+            if img is None:
+                continue
+            mask = np.zeros(img.shape[:2], dtype=np.uint8)
+
+        mp = mask_path_for(img_path, mask_output_dir)
+        cv2.imwrite(mp, mask)
+        mask_paths.append(mp)
+        if image_done_cb:
+            image_done_cb(img_path, mp)
+
+    if progress_cb:
+        progress_cb(100,
+            f"YOLO-World+SAM complete ({failed}/{total} images failed)"
+            if failed else "YOLO-World+SAM segmentation complete!")
+    return mask_paths
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # Segmentation — SkyWater  (SegFormer-B2)
 # ═══════════════════════════════════════════════════════════════════════
 
@@ -444,8 +606,9 @@ def run_segmentation(
     image_done_cb: ImageDoneCB = None,
     cancel_check: CancelCheck = None,
 ) -> list[str]:
-    """Dispatch to SAM3 or SkyWater based on *model_config*."""
+    """Dispatch to SAM3, the YOLO-World+SAM cascade, or SkyWater."""
     is_skywater = is_skywater_config(model_config)
+    is_cascade = is_yoloworld_sam_config(model_config)
     model_path = model_config.get("model_path") or ""
 
     # Auto-download if needed
@@ -453,6 +616,11 @@ def run_segmentation(
     logical_name = model_config.get("logical_name", "")
     if is_skywater:
         need_download = not model_path or not os.path.isfile(model_path)
+    elif is_cascade:
+        parts = [model_config.get(k) for k in (
+            "yoloworld_model_path", "text_encoder_path",
+            "encoder_model_path", "decoder_model_path")]
+        need_download = not all(p and os.path.isfile(p) for p in parts)
     else:
         decoder_path = model_config.get("decoder_model_path", "")
         need_download = (
@@ -480,6 +648,13 @@ def run_segmentation(
         mp = model_config.get("model_path") or model_config.get("decoder_model_path")
         return run_skywater_segmentation(
             image_paths, mask_output_dir, mp, target_classes,
+            progress_cb=progress_cb, image_done_cb=image_done_cb,
+            cancel_check=cancel_check,
+        )
+    elif is_cascade:
+        return run_yoloworld_sam_segmentation(
+            image_paths, mask_output_dir, model_config,
+            target_classes, confidence_threshold,
             progress_cb=progress_cb, image_done_cb=image_done_cb,
             cancel_check=cancel_check,
         )

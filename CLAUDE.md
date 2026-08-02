@@ -49,7 +49,7 @@ This is a **PyQt6 desktop GUI** (single-window wizard) and **CLI tool** that pre
 | `colmap_database.py` | `ColmapDatabase` context manager: creates a COLMAP-compatible SQLite DB (WAL mode, FK enabled), stores camera params as BLOBs via `struct.pack`, converts paths to relative |
 | `onnx_utils.py` | ONNX Runtime provider selection (CUDA → CoreML → CPU priority), diagnostics, and silent-overwrite auto-repair. The CPU wheel on macOS includes CoreML for Apple Silicon acceleration |
 | `theme.py` | Singleton `Theme` class: `apply_theme()` loads QSS from `views/styles/`, `_make_palette()` builds Apple HIG-inspired `QPalette` for dark/light |
-| `sam_backends/` | SAM3 ONNX inference backend (`SegmentAnything3ONNX`: image encoder + language encoder + decoder). Forces CPU EP to avoid GPU OOM; language features are cached per prompt text. SkyWater has no backend class — it is a single SegFormer session driven directly by `pipeline_core.run_skywater_segmentation()` |
+| `sam_backends/` | ONNX inference backends: `sam3_onnx.py` (`SegmentAnything3ONNX`, text prompts via built-in language encoder, forced CPU EP to avoid GPU OOM, language features cached per prompt), `sam_onnx.py`/`sam2_onnx.py`/`efficientvit_sam_onnx.py`/`edgetam_onnx.py` (box-promptable SAMs used by the YOLO-World cascade; EfficientViT-SAM is the fastest, takes decoder prompts in the SAM 1024-px frame, and batches all boxes in one decoder call via `predict_boxes()`; EdgeTAM is the smallest (~41 MB), image mode only — its export has no memory graphs), `yoloworld_onnx.py` (`YoloWorldONNX`, open-vocabulary detector: CLIP ViT-B/32 text encoder + YOLO-World v2 head + numpy per-class NMS, text features cached per vocabulary). SkyWater has no backend class — it is a single SegFormer session driven directly by `pipeline_core.run_skywater_segmentation()` |
 
 ### UI layout conventions
 
@@ -61,4 +61,10 @@ This is a **PyQt6 desktop GUI** (single-window wizard) and **CLI tool** that pre
 
 ### Segmentation model dispatch
 
-`pipeline_core.run_segmentation()` is the single dispatcher for both GUI and CLI: it classifies the model config via `is_skywater_config()`, auto-downloads missing weights through `model_downloader.download_model_entry()`, then runs `run_skywater_segmentation()` (SegFormer, fixed classes) or `run_sam_segmentation()` (SAM3, class names as text prompts). Shared conventions (`output_layout()`, `mask_path_for()`/`MASK_SUFFIX`, `PipelineConfig`) also live in `pipeline_core.py`.
+`pipeline_core.run_segmentation()` is the single dispatcher for both GUI and CLI: it classifies the model config via `is_skywater_config()` / `is_yoloworld_sam_config()`, auto-downloads missing weights through `model_downloader.download_model_entry()`, then runs one of three families:
+
+- `run_skywater_segmentation()` — SegFormer, fixed sky/water/person classes
+- `run_yoloworld_sam_segmentation()` — text-prompted cascade: YOLO-World detects boxes from class names, then a box-promptable SAM (`_load_box_sam_model()`: EfficientViT-SAM via the explicit `sam_backend` config key, otherwise SAM1-vs-SAM2 auto-detected from the decoder's ONNX inputs) masks each box; per-image union is written
+- `run_sam_segmentation()` — SAM3, class names go straight to its language encoder
+
+Cascade registry entries (`type: yoloworld_sam`) have no `download_url`; they list `components:` referencing hidden registry entries (detector, CLIP text encoder, SAM zip), each downloaded via its normal flow and merged by `model_downloader._cascade_config()`. Shared conventions (`output_layout()`, `mask_path_for()`/`MASK_SUFFIX`, `PipelineConfig`) also live in `pipeline_core.py`.

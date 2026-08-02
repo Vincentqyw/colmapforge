@@ -62,8 +62,9 @@ uv run colmapforge run -o out/ --video vid.mp4 --seg-model ...
 
 - **4-stage pipeline** — extraction → resize → masking → database, chained async via `QThreadPool`
 - **GUI + CLI** — full-featured desktop GUI or headless CLI for scripts/automation
-- **Zero-config models** — SAM3 + SkyWater auto-download on first run
+- **Zero-config models** — SAM3, YOLO-World + SAM cascades, and SkyWater auto-download on first run
 - **SAM3** — class names go straight to its native language encoder as text prompts
+- **YOLO-World + SAM1/2** — open-vocabulary detection from class names, each box masked by MobileSAM or SAM2.1-Tiny; text prompts at a fraction of SAM3's cost
 - **SkyWater** — SegFormer-B2 for fast sky/water/person segmentation (~48 MB)
 - **18 camera models** — SIMPLE_PINHOLE through EQUIRECTANGULAR
 - **GPU auto-detect** — CUDA → CoreML → CPU fallback; toolbar indicator shows active backend
@@ -78,7 +79,10 @@ All models are ONNX-based and download on first use
 | Model | Type | Size |
 |-------|------|------|
 | [SkyWater](https://github.com/Vincentqyw/skywater_seg) SegFormer-B2 (FP16) | fixed sky/water/person | ~48 MB |
-| [SkyWater](https://github.com/Vincentqyw/skywater_seg) SegFormer-B2 (FP32) | fixed sky/water/person | ~95 MB |
+| YOLO-World + MobileSAM | text prompts (detect → box-mask) | ~720 MB |
+| YOLO-World + SAM2.1-Tiny | text prompts (detect → box-mask) | ~835 MB |
+| YOLO-World + [EfficientViT-SAM-L0](https://huggingface.co/mit-han-lab/efficientvit-sam) | text prompts (detect → box-mask, fastest) | ~815 MB |
+| YOLO-World + [EdgeTAM](https://huggingface.co/onnx-community/EdgeTAM-ONNX) | text prompts (detect → box-mask, smallest SAM) | ~715 MB |
 | SAM3 ViT-H | text prompts | ~3.0 GB |
 
 ## ONNX Runtime Backend

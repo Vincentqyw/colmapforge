@@ -6,9 +6,15 @@
 #   *.zip  → downloaded + extracted (SAM3)
 #   *.onnx → downloaded as a single file (SkyWater)
 #
-# type: "segment_anything" (SAM3 — the only SAM with a native language
-# encoder, so class prompts are passed straight to it as text) or
-# "skywater" (fixed sky/water/person classes, no custom prompts).
+# type:
+#   "segment_anything" — SAM-family zip (SAM3 has a native language encoder,
+#                        so class prompts are passed straight to it as text;
+#                        SAM1/2 zips are box-prompted cascade components)
+#   "skywater"         — fixed sky/water/person classes, no custom prompts
+#   "yoloworld_sam"    — text-prompted cascade composed from `components:`
+#                        (YOLO-World detects boxes from class names, SAM1/2
+#                        masks each box); components are `hidden: true` so
+#                        they don't appear as standalone choices in the UI.
 
 # ── SkyWater (default) ────────────────────────────────────────────────
 - name: "skywater_segformer_b2_fp16"
@@ -18,12 +24,36 @@
   filename: "skywater_segformer_b2_fp16.onnx"
   size_hint_mb: 48
 
-- name: "skywater_segformer_b2_fp32"
-  display_name: "SkyWater SegFormer-B2 (FP32)"
-  type: skywater
-  download_url: "https://huggingface.co/Realcat/skywater_seg/resolve/main/skywater_segformer_b2_fp32.onnx"
-  filename: "skywater_segformer_b2_fp32.onnx"
-  size_hint_mb: 95
+# ── YOLO-World + SAM cascades (text prompts without SAM3's cost) ─────
+# default_confidence: this YOLO-World export produces low absolute scores
+# (top detections ~0.1–0.4) — 0.1 is the working threshold, NOT 0.3.
+- name: "yoloworld_mobile_sam"
+  display_name: "YOLO-World + MobileSAM"
+  type: yoloworld_sam
+  components: [yoloworld_v2_xl, clip_vit_b32_textual, mobile_sam_20230629]
+  default_confidence: 0.1
+  size_hint_mb: 720
+
+- name: "yoloworld_sam2_tiny"
+  display_name: "YOLO-World + SAM2.1-Tiny"
+  type: yoloworld_sam
+  components: [yoloworld_v2_xl, clip_vit_b32_textual, sam2.1_hiera_tiny_20260221]
+  default_confidence: 0.1
+  size_hint_mb: 835
+
+- name: "yoloworld_efficientvit_sam"
+  display_name: "YOLO-World + EfficientViT-SAM-L0"
+  type: yoloworld_sam
+  components: [yoloworld_v2_xl, clip_vit_b32_textual, efficientvit_sam_l0]
+  default_confidence: 0.1
+  size_hint_mb: 815
+
+- name: "yoloworld_edgetam"
+  display_name: "YOLO-World + EdgeTAM"
+  type: yoloworld_sam
+  components: [yoloworld_v2_xl, clip_vit_b32_textual, edgetam]
+  default_confidence: 0.1
+  size_hint_mb: 715
 
 # ── Segment Anything 3 (SAM3) ─────────────────────────────────────────
 - name: "sam3_vit_h_20260220"
@@ -31,3 +61,63 @@
   type: segment_anything
   download_url: "https://huggingface.co/vietanhdev/segment-anything-3-onnx-models/resolve/main/sam3_vit_h.zip"
   size_hint_mb: 3000
+
+# ── Hidden cascade components ─────────────────────────────────────────
+- name: "yoloworld_v2_xl"
+  display_name: "YOLO-World v2 XL (detector)"
+  type: yoloworld
+  hidden: true
+  download_url: "https://github.com/wkentaro/yolo-world-onnx/releases/download/v0.1.0/yolo_world_v2_xl_vlpan_bn_2e-3_100e_4x8gpus_obj365v1_goldg_train_lvis_minival.onnx"
+  filename: "yolo_world_v2_xl.onnx"
+  size_hint_mb: 419
+
+- name: "clip_vit_b32_textual"
+  display_name: "CLIP ViT-B/32 text encoder"
+  type: text_encoder
+  hidden: true
+  download_url: "https://clip-as-service.s3.us-east-2.amazonaws.com/models/onnx/ViT-B-32/textual.onnx"
+  filename: "clip_vit_b32_textual.onnx"
+  size_hint_mb: 254
+
+- name: "mobile_sam_20230629"
+  display_name: "Segment Anything (MobileSAM)"
+  type: segment_anything
+  hidden: true
+  download_url: "https://huggingface.co/vietanhdev/segment-anything-onnx-models/resolve/main/mobile_sam_20230629.zip"
+  size_hint_mb: 45
+
+- name: "sam2.1_hiera_tiny_20260221"
+  display_name: "Segment Anything 2.1 (Hiera-Tiny)"
+  type: segment_anything
+  hidden: true
+  download_url: "https://huggingface.co/vietanhdev/segment-anything-2.1-onnx-models/resolve/main/sam2.1_hiera_tiny_20260221.zip"
+  size_hint_mb: 160
+
+# EfficientViT-SAM (MIT Han Lab, Apache-2.0): fastest SAM drop-in.
+# Official ONNX export; decoder takes prompts in the SAM 1024-px frame.
+- name: "efficientvit_sam_l0"
+  display_name: "EfficientViT-SAM L0"
+  type: efficientvit_sam
+  hidden: true
+  files:
+    - "https://huggingface.co/mit-han-lab/efficientvit-sam/resolve/main/onnx/l0_encoder.onnx"
+    - "https://huggingface.co/mit-han-lab/efficientvit-sam/resolve/main/onnx/l0_decoder.onnx"
+  encoder_filename: "l0_encoder.onnx"
+  decoder_filename: "l0_decoder.onnx"
+  size_hint_mb: 140
+
+# EdgeTAM (Meta, Apache-2.0), image mode: tiny (~41 MB) box-promptable SAM.
+# onnx-community export; weights ship as .onnx + external .onnx_data. The
+# export has no memory graphs, so EdgeTAM's video propagation is not used.
+- name: "edgetam"
+  display_name: "EdgeTAM (image mode)"
+  type: edgetam
+  hidden: true
+  files:
+    - "https://huggingface.co/onnx-community/EdgeTAM-ONNX/resolve/main/onnx/vision_encoder.onnx"
+    - "https://huggingface.co/onnx-community/EdgeTAM-ONNX/resolve/main/onnx/vision_encoder.onnx_data"
+    - "https://huggingface.co/onnx-community/EdgeTAM-ONNX/resolve/main/onnx/prompt_encoder_mask_decoder.onnx"
+    - "https://huggingface.co/onnx-community/EdgeTAM-ONNX/resolve/main/onnx/prompt_encoder_mask_decoder.onnx_data"
+  encoder_filename: "vision_encoder.onnx"
+  decoder_filename: "prompt_encoder_mask_decoder.onnx"
+  size_hint_mb: 41
