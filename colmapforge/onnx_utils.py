@@ -31,6 +31,12 @@ logger = logging.getLogger(__name__)
 try:
     import onnxruntime as _ort
 
+    # Load CUDA/cuDNN shared libs from pip-installed nvidia-* packages
+    # (onnxruntime-gpu[cuda,cudnn]) before any session is created; without
+    # this, dlopen of libcudnn.so fails unless cuDNN is installed system-wide.
+    if hasattr(_ort, "preload_dlls"):
+        _ort.preload_dlls()
+
     _ONNXRUNTIME_AVAILABLE = True
     _ONNXRUNTIME_IMPORT_ERROR: str | None = None
 except ImportError as _e:

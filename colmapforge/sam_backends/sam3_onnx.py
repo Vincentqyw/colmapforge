@@ -1,4 +1,7 @@
+import functools
 import logging
+import os
+import subprocess
 from typing import Any
 
 import cv2
@@ -7,6 +10,36 @@ import numpy as np
 from ..onnx_utils import create_inference_session
 
 logger = logging.getLogger(__name__)
+
+# SAM3 OOMs on <8GB GPUs, so only run on GPU when there is enough VRAM.
+_SAM3_MIN_VRAM_GB = 8.0
+
+
+@functools.cache
+def _sam3_force_cpu() -> bool:
+    """Decide whether SAM3 sessions must stay on CPU.
+
+    Override with COLMAPFORGE_SAM3_DEVICE=cpu|cuda; otherwise use the GPU
+    only when total VRAM >= 8GB (SAM3 ViT-H OOMs below that).
+    """
+    override = os.environ.get("COLMAPFORGE_SAM3_DEVICE", "").lower()
+    if override == "cpu":
+        return True
+    if override in ("cuda", "gpu"):
+        return False
+    try:
+        out = subprocess.check_output(
+            ["nvidia-smi", "--query-gpu=memory.total",
+             "--format=csv,noheader,nounits"],
+            text=True, timeout=5,
+        )
+        vram_gb = max(float(x) for x in out.split()) / 1024.0
+    except Exception:
+        return True
+    force_cpu = vram_gb < _SAM3_MIN_VRAM_GB
+    logger.info("SAM3 device: %s (VRAM %.1f GB)",
+                "CPU" if force_cpu else "CUDA", vram_gb)
+    return force_cpu
 
 
 class SegmentAnything3ONNX:
@@ -158,8 +191,7 @@ class SAM3ImageEncoder:
     """
 
     def __init__(self, path: str) -> None:
-        # SAM3 OOMs on <8GB GPUs — keep on CPU until memory budget is configurable.
-        self.session = create_inference_session(path, force_cpu=True)
+        self.session = create_inference_session(path, force_cpu=_sam3_force_cpu())
         encoder_input = self.session.get_inputs()[0]
         self.input_name: str = encoder_input.name
         self.input_shape = encoder_input.shape
@@ -232,8 +264,7 @@ class SAM3LanguageEncoder:
     _OUTPUT_KEYS = ("language_mask", "language_features", "language_embeds")
 
     def __init__(self, path: str) -> None:
-        # SAM3 OOMs on <8GB GPUs — keep on CPU until memory budget is configurable.
-        self.session = create_inference_session(path, force_cpu=True)
+        self.session = create_inference_session(path, force_cpu=_sam3_force_cpu())
 
     def encode(self, text: str) -> dict[str, Any]:
         """Encode *text* into the decoder's language inputs.
@@ -264,8 +295,7 @@ class SAM3ImageDecoder:
     """
 
     def __init__(self, path: str) -> None:
-        # SAM3 OOMs on <8GB GPUs — keep on CPU until memory budget is configurable.
-        self.session = create_inference_session(path, force_cpu=True)
+        self.session = create_inference_session(path, force_cpu=_sam3_force_cpu())
         self.input_names: list[str] = [i.name for i in self.session.get_inputs()]
 
     def __call__(
