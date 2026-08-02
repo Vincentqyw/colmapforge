@@ -17,7 +17,7 @@ import logging
 import os
 
 from .camera_models import CAMERA_MODELS, CAMERA_MODEL_BY_NAME, DEFAULT_CAMERA_MODEL_ID
-from .model_downloader import discover_models
+from .model_downloader import discover_models, download_model_entry
 from .pipeline_core import (
     PipelineConfig,
     apply_resize,
@@ -223,6 +223,77 @@ def resolve_model_config(model_name: str | None, seg_enabled: bool) -> dict | No
         f"Unknown model: {model_name!r}.{hint}\n"
         f"Run 'colmapforge run --list-models' to see available models."
     )
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Model pre-download  (colmapforge download ...)
+# ═══════════════════════════════════════════════════════════════════════
+
+def build_download_parser() -> argparse.ArgumentParser:
+    """Build the argument parser for the ``download`` subcommand."""
+    parser = argparse.ArgumentParser(
+        prog="colmapforge download",
+        description="Pre-download segmentation models so runs never wait on the network. "
+                    "Already-downloaded models (and cascade components) are skipped.",
+        epilog="Examples:\n"
+               "  colmapforge download --all\n"
+               "  colmapforge download yoloworld_edgetam sam3_vit_h_20260220\n"
+               "  colmapforge download --list\n",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("models", nargs="*", metavar="NAME",
+                        help="Model name(s) from the registry (see --list)")
+    parser.add_argument("--all", action="store_true",
+                        help="Download every model in the registry")
+    parser.add_argument("--list", action="store_true", dest="list_models",
+                        help="List models with download status and exit")
+    return parser
+
+
+def _download_progress(msg: str, done: int, total: int) -> None:
+    print(f"\r  {msg[:76]:<76}", end="", flush=True)
+
+
+def run_download(argv: list[str] | None = None) -> int:
+    """Entry point for ``colmapforge download``. Returns 0 on success."""
+    parser = build_download_parser()
+    args = parser.parse_args(argv)
+    logging.basicConfig(level=logging.WARNING)
+
+    models = discover_models()
+    by_name = {m["name"]: m for m in models}
+
+    if args.list_models or (not args.models and not args.all):
+        print_models()
+        if not args.list_models:
+            print("\nUsage: colmapforge download --all | NAME [NAME ...]")
+        return 0
+
+    names = [m["name"] for m in models] if args.all else args.models
+    failed: list[str] = []
+    for name in names:
+        cfg = by_name.get(name)
+        display = (cfg or {}).get("display_name", name)
+        if cfg and cfg.get("has_downloaded"):
+            print(f"[skip] {display} — already downloaded")
+            continue
+        size = (cfg or {}).get("size_hint_mb", 0)
+        tag = f" (~{size} MB)" if size else ""
+        print(f"[get ] {display}{tag}")
+        try:
+            # Cached cascade components short-circuit inside, so partially
+            # downloaded models only fetch what is missing.
+            download_model_entry(name, progress_callback=_download_progress)
+            print(f"\r  {'':76}\r[done] {display}")
+        except Exception as e:
+            print(f"\r  {'':76}\r[fail] {display}: {e}")
+            failed.append(name)
+
+    if failed:
+        print(f"\n{len(failed)} download(s) failed: {', '.join(failed)}")
+        print("Run 'colmapforge download --list' to see available models.")
+        return 1
+    return 0
 
 
 # ═══════════════════════════════════════════════════════════════════════

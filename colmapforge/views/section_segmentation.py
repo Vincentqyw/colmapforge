@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ..pipeline_core import is_skywater_config
-from .constants import PRESET_CLASSES, QUICK_PRESETS, _W
+from .constants import DEFAULT_PRESET, PRESET_CLASSES, QUICK_PRESETS, _W
 from .icons import _icon_clear
 from .widgets import _combo, _dspin, _grid_row, _label, _section_card, _section_header
 
@@ -65,7 +65,8 @@ class SegmentationSection(QWidget):
         # Connect preset signal AFTER _class_checks is populated (setCurrentIndex
         # triggers _apply_preset which iterates _class_checks).
         self.cmb_presets.currentIndexChanged.connect(self._apply_preset)
-        self.cmb_presets.setCurrentIndex(1)
+        default_idx = self.cmb_presets.findText(DEFAULT_PRESET)
+        self.cmb_presets.setCurrentIndex(default_idx if default_idx >= 0 else 0)
 
         # ── Custom class row: input + add button + clear all button ──
         cust_row = QWidget(); cr = QHBoxLayout(cust_row)

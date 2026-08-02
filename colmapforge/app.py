@@ -3,9 +3,11 @@
 COLMAP Forge — Standalone Application Launcher.
 
 Usage:
-    colmapforge                  Launch the GUI
-    colmapforge run [options]    Run the CLI pipeline (headless)
-    colmapforge run --help       Show CLI options
+    colmapforge                       Launch the GUI
+    colmapforge run [options]         Run the CLI pipeline (headless)
+    colmapforge run --help            Show CLI options
+    colmapforge download --all        Pre-download all models
+    colmapforge download NAME [...]   Pre-download specific models
 """
 
 from __future__ import annotations
@@ -86,6 +88,10 @@ def main(argv: list[str] | None = None) -> int:
     if len(argv) >= 1 and argv[0] == "run":
         from .cli import run_cli
         return run_cli(argv[1:])
+
+    if len(argv) >= 1 and argv[0] == "download":
+        from .cli import run_download
+        return run_download(argv[1:])
 
     # ── GUI mode ──
     parser = argparse.ArgumentParser(prog="colmapforge",

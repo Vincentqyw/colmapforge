@@ -15,6 +15,10 @@
 #                        (YOLO-World detects boxes from class names, SAM1/2
 #                        masks each box); components are `hidden: true` so
 #                        they don't appear as standalone choices in the UI.
+#
+# sha256: downloads are verified against this field — a single hex string
+# for single-file / zip entries, or a {filename: hex} mapping for `files:`
+# entries. A mismatched download is deleted and the run fails loudly.
 
 # ── SkyWater (default) ────────────────────────────────────────────────
 - name: "skywater_segformer_b2_fp16"
@@ -22,6 +26,7 @@
   type: skywater
   download_url: "https://huggingface.co/Realcat/skywater_seg/resolve/main/skywater_segformer_b2_fp16.onnx"
   filename: "skywater_segformer_b2_fp16.onnx"
+  sha256: "a4f518e6ace87b3ee473ea2578d00f0fb5f7bf8e4e6a3a49ae368c048c4e47c3"
   size_hint_mb: 48
 
 # ── YOLO-World + SAM cascades (text prompts without SAM3's cost) ─────
@@ -60,23 +65,28 @@
   display_name: "Segment Anything 3 (ViT-H)"
   type: segment_anything
   download_url: "https://huggingface.co/vietanhdev/segment-anything-3-onnx-models/resolve/main/sam3_vit_h.zip"
+  sha256: "1617436f9db7eb9dd69029c2c465d54b316c36c21143f0fde0d1be513f15b7d5"
   size_hint_mb: 3000
 
 # ── Hidden cascade components ─────────────────────────────────────────
+# Mirrored at https://huggingface.co/Realcat/yolo-world-onnx (originals:
+# wkentaro/yolo-world-onnx GitHub release + clip-as-service S3 bucket).
 - name: "yoloworld_v2_xl"
   display_name: "YOLO-World v2 XL (detector)"
   type: yoloworld
   hidden: true
-  download_url: "https://github.com/wkentaro/yolo-world-onnx/releases/download/v0.1.0/yolo_world_v2_xl_vlpan_bn_2e-3_100e_4x8gpus_obj365v1_goldg_train_lvis_minival.onnx"
+  download_url: "https://huggingface.co/Realcat/yolo-world-onnx/resolve/main/yolo_world_v2_xl.onnx"
   filename: "yolo_world_v2_xl.onnx"
+  sha256: "92660c6456766439a2670cf19a8a258ccd3588118622a15959f39e253731c05d"
   size_hint_mb: 419
 
 - name: "clip_vit_b32_textual"
   display_name: "CLIP ViT-B/32 text encoder"
   type: text_encoder
   hidden: true
-  download_url: "https://clip-as-service.s3.us-east-2.amazonaws.com/models/onnx/ViT-B-32/textual.onnx"
+  download_url: "https://huggingface.co/Realcat/yolo-world-onnx/resolve/main/clip_vit_b32_textual.onnx"
   filename: "clip_vit_b32_textual.onnx"
+  sha256: "55c85d8cbb096023781c1d13c557eb95d26034c111bd001b7360fdb7399eec68"
   size_hint_mb: 254
 
 - name: "mobile_sam_20230629"
@@ -84,6 +94,7 @@
   type: segment_anything
   hidden: true
   download_url: "https://huggingface.co/vietanhdev/segment-anything-onnx-models/resolve/main/mobile_sam_20230629.zip"
+  sha256: "41aff2660b7531becfee21fb257c49933ddc892c554507bdb775bf504d443942"
   size_hint_mb: 45
 
 - name: "sam2.1_hiera_tiny_20260221"
@@ -91,6 +102,7 @@
   type: segment_anything
   hidden: true
   download_url: "https://huggingface.co/vietanhdev/segment-anything-2.1-onnx-models/resolve/main/sam2.1_hiera_tiny_20260221.zip"
+  sha256: "c602cb3f6fd297312a415f885f0df3f0eef9fbb334b069c9d30e828f2ae7c69a"
   size_hint_mb: 160
 
 # EfficientViT-SAM (MIT Han Lab, Apache-2.0): fastest SAM drop-in.
@@ -104,6 +116,9 @@
     - "https://huggingface.co/mit-han-lab/efficientvit-sam/resolve/main/onnx/l0_decoder.onnx"
   encoder_filename: "l0_encoder.onnx"
   decoder_filename: "l0_decoder.onnx"
+  sha256:
+    l0_encoder.onnx: "7a37ebd16e65c31253416e33897e7e6b07699127765d538e99ecbfaa3ad1e727"
+    l0_decoder.onnx: "053e72c5703736a8a8a92482c9990c4a26dde9dcb7ff26b05843cf0bc433f42f"
   size_hint_mb: 140
 
 # EdgeTAM (Meta, Apache-2.0), image mode: tiny (~41 MB) box-promptable SAM.
@@ -120,4 +135,9 @@
     - "https://huggingface.co/onnx-community/EdgeTAM-ONNX/resolve/main/onnx/prompt_encoder_mask_decoder.onnx_data"
   encoder_filename: "vision_encoder.onnx"
   decoder_filename: "prompt_encoder_mask_decoder.onnx"
+  sha256:
+    vision_encoder.onnx: "ed068218eba96760fe02d04ce899c449660ac813a088d80ed7f42c8bb01e7cec"
+    vision_encoder.onnx_data: "21e75dba7077dfcb53e8c9a6e99977156f2240ff3f1f9cddc43d66aa1ecb528e"
+    prompt_encoder_mask_decoder.onnx: "d3668299ec3edf70fbb139ec642b54bf3d4be453fd1b688a6b5938e0856fe546"
+    prompt_encoder_mask_decoder.onnx_data: "dfa2125e30d08d388732f20c18fb63ab0f0f590cd270eb307f0c2b65919d1be8"
   size_hint_mb: 41

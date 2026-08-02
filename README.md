@@ -38,6 +38,12 @@ uv run colmapforge run -o out/ --video vid.mp4 \
 uv run colmapforge run --list-models
 uv run colmapforge run --list-cameras
 
+# Pre-download models (batch or by name; already-downloaded are skipped,
+# every download is SHA256-verified)
+uv run colmapforge download --all
+uv run colmapforge download yoloworld_edgetam sam3_vit_h_20260220
+uv run colmapforge download --list
+
 # Progress bars are shown automatically via tqdm
 uv run colmapforge run -o out/ --video vid.mp4 --seg-model ...
 ```
@@ -84,6 +90,30 @@ All models are ONNX-based and download on first use
 | YOLO-World + [EfficientViT-SAM-L0](https://huggingface.co/mit-han-lab/efficientvit-sam) | text prompts (detect → box-mask, fastest) | ~815 MB |
 | YOLO-World + [EdgeTAM](https://huggingface.co/onnx-community/EdgeTAM-ONNX) | text prompts (detect → box-mask, smallest SAM) | ~715 MB |
 | SAM3 ViT-H | text prompts | ~3.0 GB |
+
+## Benchmark
+
+Per-frame segmentation time on a real 360° street sequence (960×480
+equirectangular frames: bike rider + parked cars). Text-driven models are
+prompted with `person car` (~7 detected boxes/frame); SkyWater runs its fixed
+sky/water/person classes. Steady state after warmup, mean ± std over 6 frames
+(SAM3: 3). Machine: Apple M4 Pro, ONNX Runtime 1.28 (CoreML/CPU providers).
+
+| Model | s/frame |
+|-------|--------:|
+| SkyWater SegFormer-B2 (FP16) | **0.07** |
+| YOLO-World + EdgeTAM | 0.67 ± 0.11 |
+| YOLO-World + EfficientViT-SAM-L0 | 0.85 ± 0.16 |
+| YOLO-World + MobileSAM | 1.08 ± 0.20 |
+| YOLO-World + SAM2.1-Tiny | 1.50 ± 0.14 |
+| SAM3 ViT-H | 6.79 ± 1.09 |
+
+Notes: cascade time grows with the detected box count (EfficientViT-SAM
+decodes all boxes in one batched call, so it degrades the least on crowded
+frames and wins on large/high-box-count images); SAM3 costs roughly one extra
+decoder pass (~1 s) per additional prompt class, while YOLO-World handles any
+number of classes in a single detector pass. NVIDIA GPUs are substantially
+faster across the board (SkyWater ≈ 13 ms/frame on an RTX 3060).
 
 ## ONNX Runtime Backend
 

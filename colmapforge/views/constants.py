@@ -34,3 +34,5 @@ QUICK_PRESETS = {
     "All Dynamics": list(PRESET_CLASSES),
     "Animals": ["bird", "cat", "dog"],
 }
+
+DEFAULT_PRESET = "All Dynamics"

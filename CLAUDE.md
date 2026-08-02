@@ -12,6 +12,8 @@ uv run colmapforge run -o out/ --video vid.mp4  # Run CLI pipeline (headless)
 uv run colmapforge run --help    # Show CLI options
 uv run colmapforge run --list-models  # List available segmentation models
 uv run colmapforge run --list-cameras # List available camera models
+uv run colmapforge download --all     # Pre-download all models (skips cached, SHA256-verified)
+uv run colmapforge download NAME ...  # Pre-download specific models
 uv run colmapforge --log-level DEBUG  # Launch GUI with debug logging
 uv run ruff check .              # Lint the project
 ```

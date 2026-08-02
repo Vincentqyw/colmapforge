@@ -12,6 +12,7 @@ no manual model placement required.
 
 from __future__ import annotations
 
+import hashlib
 import importlib.resources as pkg_resources
 import logging
 import os
@@ -396,12 +397,47 @@ def discover_models() -> list[dict]:
 # ── Public API: unified model download ───────────────────────────────
 
 
+def _expected_sha256(entry: dict, filename: str) -> str | None:
+    """Expected hash for *filename* of *entry*.
+
+    The registry ``sha256`` field is either a single hex string (single-file
+    and zip entries) or a ``{filename: hex}`` mapping (``files:`` entries).
+    """
+    spec = entry.get("sha256")
+    if isinstance(spec, dict):
+        return spec.get(filename)
+    return spec
+
+
+def _verify_sha256(path: str, expected: str | None, display: str) -> None:
+    """Verify *path* against *expected*; delete the file and raise on mismatch."""
+    if not expected:
+        return
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 22), b""):
+            h.update(chunk)
+    digest = h.hexdigest()
+    if digest != expected.lower():
+        os.remove(path)
+        raise RuntimeError(
+            f"SHA256 mismatch for {display}:\n"
+            f"  expected {expected}\n"
+            f"  got      {digest}\n"
+            "The corrupt download was removed — retry, and if it persists "
+            "check the registry hash / mirror."
+        )
+    logger.info("SHA256 verified for %s", display)
+
+
 def _download_file(
     url: str, dest_path: str,
     display: str, size_hint: int,
     progress_callback: Callable[[str, int, int], None] | None,
+    sha256: str | None = None,
 ) -> None:
-    """Download *url* to *dest_path* with a throttled progress callback."""
+    """Download *url* to *dest_path* with a throttled progress callback,
+    then verify its SHA256 when the registry provides one."""
     if progress_callback:
         progress_callback(
             f"Downloading {display} (~{size_hint} MB)...", 0, 100,
@@ -429,6 +465,11 @@ def _download_file(
             "Check your network connection."
         ) from e
 
+    if sha256:
+        if progress_callback:
+            progress_callback(f"Verifying {display} (SHA256)...", 99, 100)
+        _verify_sha256(dest_path, sha256, display)
+
 
 def _download_zip(entry: dict, model_dir: str, progress_callback) -> None:
     """Download and extract a zip model (SAM3)."""
@@ -437,7 +478,8 @@ def _download_zip(entry: dict, model_dir: str, progress_callback) -> None:
     tmp_dir = tempfile.mkdtemp(prefix="colmap_sam_")
     try:
         zip_path = os.path.join(tmp_dir, "model.zip")
-        _download_file(entry["download_url"], zip_path, display, size_hint, progress_callback)
+        _download_file(entry["download_url"], zip_path, display, size_hint, progress_callback,
+                       sha256=_expected_sha256(entry, os.path.basename(entry["download_url"])))
 
         if progress_callback:
             # Reset to 0 % — zip extraction can take a while and we cannot
@@ -484,6 +526,7 @@ def _download_single(entry: dict, model_dir: str, progress_callback) -> None:
         entry["download_url"], dest,
         entry.get("display_name", entry["name"]),
         entry.get("size_hint_mb", 0), progress_callback,
+        sha256=_expected_sha256(entry, filename),
     )
 
 
@@ -531,7 +574,8 @@ def download_model_entry(
             if os.path.isfile(dest):
                 continue
             _download_file(url, dest, f"{display} ({os.path.basename(dest)})",
-                           entry.get("size_hint_mb", 0), progress_callback)
+                           entry.get("size_hint_mb", 0), progress_callback,
+                           sha256=_expected_sha256(entry, os.path.basename(dest)))
         return {
             "type": entry.get("type", ""),
             "name": entry["name"],
