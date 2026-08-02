@@ -93,27 +93,24 @@ All models are ONNX-based and download on first use
 
 ## Benchmark
 
-Per-frame segmentation time on a real 360° street sequence (960×480
-equirectangular frames: bike rider + parked cars). Text-driven models are
-prompted with `person car` (~7 detected boxes/frame); SkyWater runs its fixed
-sky/water/person classes. Steady state after warmup, mean ± std over 6 frames
-(SAM3: 3). Machine: Apple M4 Pro, ONNX Runtime 1.28 (CoreML/CPU providers).
+Steady-state seconds per frame on a real 360° street sequence (79
+equirectangular 960×480 frames), ONNX Runtime 1.28, default "All Dynamics"
+prompt preset (16 classes). Apple M4 Pro uses the CoreML/CPU providers
+(`--extra cpu`), RTX 5090 uses CUDA + cuDNN 9 (`--extra gpu`).
 
-| Model | s/frame |
-|-------|--------:|
-| SkyWater SegFormer-B2 (FP16) | **0.07** |
-| YOLO-World + EdgeTAM | 0.67 ± 0.11 |
-| YOLO-World + EfficientViT-SAM-L0 | 0.85 ± 0.16 |
-| YOLO-World + MobileSAM | 1.08 ± 0.20 |
-| YOLO-World + SAM2.1-Tiny | 1.50 ± 0.14 |
-| SAM3 ViT-H | 6.79 ± 1.09 |
+| Model | M4 Pro | RTX 5090 | GPU speedup |
+|-------|-------:|---------:|------------:|
+| SkyWater SegFormer-B2 (FP16) | **0.074** | **0.007** | 11× |
+| YOLO-World + EdgeTAM | 0.85 | 0.053 | 16× |
+| YOLO-World + EfficientViT-SAM-L0 | 1.10 | 0.025 | 44× |
+| YOLO-World + MobileSAM | 1.26 | 0.039 | 32× |
+| YOLO-World + SAM2.1-Tiny | 1.59 | 0.068 | 23× |
+| SAM3 ViT-H | 15.84 | 0.659 | 24× |
 
-Notes: cascade time grows with the detected box count (EfficientViT-SAM
-decodes all boxes in one batched call, so it degrades the least on crowded
-frames and wins on large/high-box-count images); SAM3 costs roughly one extra
-decoder pass (~1 s) per additional prompt class, while YOLO-World handles any
-number of classes in a single detector pass. NVIDIA GPUs are substantially
-faster across the board (SkyWater ≈ 13 ms/frame on an RTX 3060).
+SAM3 costs roughly one decoder pass per prompt class (fewer classes → much
+faster; ~7 s/frame with 2 classes on M4 Pro), while YOLO-World handles any
+number of classes in a single detector pass. The fastest cascade differs by
+device: EdgeTAM on Apple Silicon, EfficientViT-SAM-L0 on CUDA.
 
 ## ONNX Runtime Backend
 
