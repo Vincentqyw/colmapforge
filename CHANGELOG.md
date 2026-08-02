@@ -2,6 +2,26 @@
 
 All notable changes to this project are documented in this file.
 
+## 1.4.0 - 2026-08-02
+
+### Features
+- Headless CLI mode (`colmapforge run`) running the full pipeline without
+  Qt, plus a `cmf` alias.
+- YOLO-World + SAM text-prompt cascades with four mask backends: MobileSAM,
+  SAM2.1-Tiny, EfficientViT-SAM-L0, and EdgeTAM.
+- Model download overhaul: Hugging Face mirror support, SHA256
+  verification, and a `colmapforge download` predownload command.
+- Sensible CLI defaults and richer top-level help.
+- SAM3 runs on GPU when VRAM >= 8 GB; CUDA/cuDNN bundled via pip extras.
+
+### Refactor
+- Drop the osam dependency — the CLIP BPE tokenizer is now vendored.
+- Remove dead code and dedupe GUI/CLI pipeline logic.
+
+### Documentation
+- Re-benchmark Apple M4 Pro and merge with RTX 5090 results into a single
+  comparison table.
+
 ## 1.3.0 - 2026-08-01
 
 ### Features
