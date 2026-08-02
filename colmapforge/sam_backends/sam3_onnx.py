@@ -220,10 +220,11 @@ class SAM3LanguageEncoder:
     shape : ``[1, 32]``
     dtype : int64
 
-    Tokenisation matches the ``osam`` reference driver for these exports
-    (``osam/_models/sam3/_models.py``): the CLIP BPE tokeniser at
-    ``context_length=32``.  Keep the two in sync — a mismatched vocabulary
-    silently produces meaningless language features rather than an error.
+    Tokenisation uses the vendored CLIP BPE tokeniser
+    (``colmapforge.sam_backends.clip``) at ``context_length=32``, matching
+    the reference driver these exports were validated against — a mismatched
+    vocabulary silently produces meaningless language features rather than
+    an error.
     """
 
     #: Output count varies by export: some publish only
@@ -233,25 +234,6 @@ class SAM3LanguageEncoder:
     def __init__(self, path: str) -> None:
         # SAM3 OOMs on <8GB GPUs — keep on CPU until memory budget is configurable.
         self.session = create_inference_session(path, force_cpu=True)
-        try:
-            from osam._models.yoloworld.clip import tokenize
-
-            self._tokenize = tokenize
-        except ImportError:
-            self._tokenize = self._fallback_tokenize
-
-    def _fallback_tokenize(self, texts, context_length: int = 32) -> np.ndarray:
-        """Minimal fallback tokeniser (all zeros = empty sequence).
-
-        Warning: the model will produce near-random language features when
-        this fallback is used.  Install ``osam`` for correct tokenisation.
-        """
-        logger.warning(
-            "SAM3 language encoder using all-zeros fallback tokenizer — "
-            "text prompts will produce near-random results. "
-            "Install 'osam' for correct tokenization."
-        )
-        return np.zeros((len(texts), context_length), dtype=np.int64)
 
     def encode(self, text: str) -> dict[str, Any]:
         """Encode *text* into the decoder's language inputs.
@@ -264,9 +246,9 @@ class SAM3LanguageEncoder:
         return dict(zip(self._OUTPUT_KEYS, self(text)))
 
     def __call__(self, text: str) -> list[np.ndarray]:
-        tokens = self._tokenize([text], context_length=32)
-        if not isinstance(tokens, np.ndarray):
-            tokens = np.asarray(tokens, dtype=np.int64)
+        from .clip import tokenize
+
+        tokens = tokenize([text], context_length=32)
         return self.session.run(None, {"tokens": tokens})
 
 

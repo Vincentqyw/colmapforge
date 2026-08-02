@@ -14,7 +14,6 @@ dependencies = [
     "pyyaml>=6.0",
     "PyQt6>=6.6",
     "darkdetect>=0.8",
-    "osam>=0.2.0",
     "tqdm>=4.66",
     # ONNX Runtime is NOT a hard dependency — install via extras:
     #   uv sync --extra cpu   (all platforms, CoreML on macOS)

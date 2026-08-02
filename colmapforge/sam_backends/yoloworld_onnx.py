@@ -19,6 +19,7 @@ import cv2
 import numpy as np
 
 from ..onnx_utils import create_inference_session
+from .clip import tokenize
 
 logger = logging.getLogger(__name__)
 
@@ -55,16 +56,8 @@ class YoloWorldONNX:
         if cached is not None:
             return cached
 
-        try:
-            from osam._models.yoloworld.clip import tokenize
-        except ImportError as e:
-            raise RuntimeError(
-                "YOLO-World text prompts require the 'osam' package for CLIP "
-                "tokenization — reinstall dependencies (uv sync) and retry."
-            ) from e
-
         # The trailing " " is the padding/background class expected by the
-        # export (same trick as the osam reference driver).
+        # export (same trick as the reference driver).
         tokens = tokenize(texts=list(texts) + [" "])
         feats = self.text_session.run(None, {"input": tokens})[0]
         feats = feats / np.linalg.norm(feats, ord=2, axis=1, keepdims=True)

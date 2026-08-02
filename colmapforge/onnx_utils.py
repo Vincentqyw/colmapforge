@@ -298,7 +298,7 @@ def auto_fix_overwrite() -> tuple[bool, str]:
             shutil.rmtree(os.path.join(site_packages, name), ignore_errors=True)
             logger.info("Removed residual %s", name)
 
-    # Step 3: reinstall GPU wheel with --no-deps (prevents osam from pulling CPU)
+    # Step 3: reinstall GPU wheel with --no-deps (keeps deps from pulling the CPU wheel)
     if pm == "uv":
         rc, out, err = _run_subprocess([
             "uv", "pip", "install", "onnxruntime-gpu", "--no-deps",

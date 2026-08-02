@@ -55,8 +55,8 @@ def _launch_gui(log_level: str) -> int:
     app.setFont(font)
 
     # ── Self-healing: detect & auto-fix the silent-overwrite problem ──
-    # If osam (or any other package) pulled the CPU onnxruntime wheel back
-    # in and overwrote onnxruntime-gpu's binaries, this will offer to
+    # If another package pulled the CPU onnxruntime wheel back in and
+    # overwrote onnxruntime-gpu's binaries, this will offer to
     # uninstall the CPU wheel + reinstall GPU, then ask the user to restart.
     # Must run AFTER QApplication is created (uses QMessageBox).
     #
